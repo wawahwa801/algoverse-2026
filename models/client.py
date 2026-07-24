@@ -7,14 +7,13 @@ from typing import Any, Iterator, Mapping, Sequence, Union
 import httpx
 from ollama import ChatResponse, Client
 
-from qwen3.effort import OllamaThink, ReasoningEffort
+from effort import OllamaThink, ReasoningEffort
 
 Message = Mapping[str, Any]
 Messages = Sequence[Message]
 EffortInput = Union[ReasoningEffort, str, bool, None]
 
-# The Ollama HTTP API accepts "max", but ollama-python 0.6.2 validates think
-# as bool | "low" | "medium" | "high" only.
+
 _SDK_UNSUPPORTED_THINK: frozenset[str] = frozenset({"max"})
 
 
