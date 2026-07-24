@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any, Iterator, Mapping, Sequence, Union
-
-import httpx
 from ollama import ChatResponse, Client
 
 from effort import OllamaThink, ReasoningEffort
+
+import httpx
+import json
+
 
 Message = Mapping[str, Any]
 Messages = Sequence[Message]
