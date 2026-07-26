@@ -8,10 +8,13 @@ from pathlib import Path
 
 MODEL = "qwen3:4b"
 
-DATASET_PATH = Path("/Users/jonas/code/algoverse-2026/data/bbq_subset.jsonl")
 
-RESULTS_JSON = Path("/Users/jonas/code/algoverse-2026/bbq_results.json")
-RESULTS_CSV = Path("/Users/jonas/code/algoverse-2026/bbq_results.csv")
+
+
+DATASET_PATH = Path("bbq_subset.jsonl")
+
+RESULTS_JSON = Path("results/bbq_results.json")
+RESULTS_CSV = Path("results/bbq_results.csv")
 
 EFFORTS = [
     "off",
