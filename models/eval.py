@@ -15,12 +15,12 @@ NATIVE_EFFORTS = [
 "off",
 "low",
 "medium",
+"high",
 ]
 
 BUDGETS = [
 128,
 512,
-2048,
 ]
 
 PROMPT_CONTROLS = [
@@ -43,6 +43,7 @@ def test_effort_conversion():
     assert ReasoningEffort.from_value(False) == ReasoningEffort.OFF
 
     assert ReasoningEffort.from_value(None) == ReasoningEffort.MEDIUM
+
 
 def test_ollama_conversion():
     assert ReasoningEffort.OFF.to_ollama_think() is False
@@ -1136,4 +1137,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
