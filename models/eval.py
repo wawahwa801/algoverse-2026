@@ -826,9 +826,6 @@ def build_conditions():
 
     conditions = []
 
-    # Commenting out 'off' native efforts as requested.
-    # 'off' is not present in NATIVE_EFFORTS, so this part of the instruction
-    # doesn't change the code here, but the instruction is noted.
     for effort in NATIVE_EFFORTS:
         conditions.append(
             {
@@ -850,8 +847,6 @@ def build_conditions():
         )
 
     for max_tokens in BUDGETS:
-        # Only consider True for think modes as requested
-        # This effectively comments out the False case.
         for think in BUDGET_THINK_MODES:
             conditions.append(
                 {
