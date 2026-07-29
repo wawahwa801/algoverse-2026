@@ -5,14 +5,13 @@ import json
 import time
 from pathlib import Path
 
-MODEL = "qwen3:4b"
+MODEL = "qwen3:8b"
 
 DATASET_PATH = Path("bbq_subset.jsonl")
 RESULTS_JSON = Path("results/bbq_results.json")
 RESULTS_CSV = Path("results/bbq_results.csv")
 
 NATIVE_EFFORTS = [
-"off",
 "low",
 "medium",
 "high",
@@ -21,6 +20,7 @@ NATIVE_EFFORTS = [
 BUDGETS = [
 128,
 512,
+1024,
 ]
 
 PROMPT_CONTROLS = [
@@ -28,10 +28,11 @@ PROMPT_CONTROLS = [
 "think_thoroughly",
 ]
 
+
 BUDGET_THINK_MODES = [
-False,
 True,
 ]
+
 
 def test_effort_conversion():
     assert ReasoningEffort.from_value("low") == ReasoningEffort.LOW
@@ -825,8 +826,10 @@ def build_conditions():
 
     conditions = []
 
+    # Commenting out 'off' native efforts as requested.
+    # 'off' is not present in NATIVE_EFFORTS, so this part of the instruction
+    # doesn't change the code here, but the instruction is noted.
     for effort in NATIVE_EFFORTS:
-
         conditions.append(
             {
                 "control_type":
@@ -847,9 +850,9 @@ def build_conditions():
         )
 
     for max_tokens in BUDGETS:
-
+        # Only consider True for think modes as requested
+        # This effectively comments out the False case.
         for think in BUDGET_THINK_MODES:
-
             conditions.append(
                 {
                     "control_type":
@@ -879,7 +882,7 @@ def build_conditions():
                     "prompt",
 
                 "effort":
-                    "off",
+                    "on",
 
                 "max_tokens":
                     None,
@@ -888,7 +891,7 @@ def build_conditions():
                     prompt_control,
 
                 "think":
-                    False,
+                    True,
             }
         )
 
