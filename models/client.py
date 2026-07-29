@@ -103,16 +103,33 @@ class Qwen3Client:
         effort: ReasoningEffort,
         *,
         stream: bool,
+        max_tokens: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+
         think: OllamaThink = effort.to_ollama_think()
-        return {
+
+        request = {
             "model": self.model,
             "messages": list(messages),
             "think": think,
             "stream": stream,
             **kwargs,
         }
+
+
+        if max_tokens is not None:
+
+            options = request.get(
+                "options",
+                {}
+            ).copy()
+
+            options["num_predict"] = max_tokens
+
+            request["options"] = options
+
+        return request
 
     def _post_chat(self, request: dict[str, Any]) -> dict[str, Any]:
         response = httpx.post(
