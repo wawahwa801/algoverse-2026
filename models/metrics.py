@@ -117,3 +117,40 @@ def save_csv(results, path):
         writer.writeheader()
         for result in results:
             writer.writerow({field: result.get(field) for field in fieldnames})
+
+def get_cut_points(full_chain, num_cuts=15):
+    length = len(full_chain)
+    cut_points = []
+    for i in range(1, num_cuts + 1):
+        frac = i / num_cuts
+        idx = int(length * frac)
+        cut_points.append((frac, full_chain[:idx]))
+    return cut_points
+
+def find_commitment_point(trajectory):
+    final_answer = max(trajectory[-1][1], key=trajectory[-1][1].get)
+    commitment_frac = trajectory[-1][0]
+    
+    for frac, probs in reversed(trajectory):
+        current_answer = max(probs, key=probs.get)
+        if current_answer == final_answer:
+            commitment_frac = frac
+        else:
+            break
+
+    return commitment_frac, final_answer
+
+def summarize_stability(results):
+    fracs = [r[0] for r in results]
+    answers = [r[1] for r in results]
+    avg_frac = sum(fracs) / len(fracs) if fracs else 0
+    spread = max(fracs) - min(fracs) if fracs else 0
+    consistent = len(set(answers)) == 1
+
+    return {
+        "commitment_fractions": fracs,
+        "answers": answers,
+        "avg_fraction": avg_frac,
+        "spread": spread,
+        "consistent": consistent,
+    }

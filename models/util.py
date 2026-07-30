@@ -103,3 +103,37 @@ def parse_answer(text, valid_indices):
                 return value
                 
     return None
+
+import random
+
+def get_answer_options(item):
+    answers = item["answers"]
+    return [str(int(k) + 1) for k in sorted(answers.keys(), key=int)]
+
+def get_stereotype_labels(item):
+    target_loc = item["target_loc"]
+    unknown_loc = item["unknown_answer"]
+    answer_groups = item["answer_groups"]
+
+    target_label = str(target_loc + 1)
+    unknown_label = str(unknown_loc + 1)
+    non_target_loc = [
+        int(k) for k in answer_groups
+        if int(k) != target_loc and int(k) != unknown_loc
+    ][0]
+
+    return {
+        "target": target_label,
+        "non_target": str(non_target_loc + 1),
+        "unknown": unknown_label,
+    }
+
+def sample_items(items, n=5, category=None, context_condition=None, seed=42):
+    filtered = items
+    if category:
+        filtered = [i for i in filtered if i["category"] == category]
+    if context_condition:
+        filtered = [i for i in filtered if i["context_condition"] == context_condition]
+
+    random.seed(seed)
+    return random.sample(filtered, min(n, len(filtered)))

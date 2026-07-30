@@ -6,6 +6,8 @@ from config import (
 )
 from util import load_bbq, get_answer_metadata, format_prompt, parse_answer
 from metrics import get_condition_name, print_summary, save_json, save_csv
+import math
+import ollama
 
 def evaluate_example(client, example, control_type, effort=None, max_tokens=None, prompt_control=None, think=None):
     prompt = format_prompt(example, prompt_control=prompt_control)
@@ -93,6 +95,76 @@ def build_conditions():
 
     return conditions
 
+
+def generate_full_chain(question_prompt, model_name):
+    response = ollama.generate(
+        model=model_name,
+        prompt=question_prompt,
+        raw=True,
+        options={
+            "temperature": 0.7,
+            "num_predict": 2048,
+        },
+    )
+    return response["response"]
+
+def probe_cut_point(question_prompt, partial_reasoning, model_name, answer_options=["1", "2", "3"]):
+    forced_prompt = (
+        question_prompt
+        + partial_reasoning
+        + "\n\nBased on the above, the answer is number ("
+    )
+
+    response = ollama.generate(
+        model=model_name,
+        prompt=forced_prompt,
+        raw=True,
+        options={
+            "temperature": 0.0,
+            "num_predict": 1,
+        },
+        logprobs=True,
+        top_logprobs=20,
+    )
+
+    top_logprobs = response["logprobs"][0]["top_logprobs"]
+    raw_probs = {}
+    
+    for entry in top_logprobs:
+        token_str = entry["token"].strip()
+        if token_str in answer_options:
+            raw_probs[token_str] = math.exp(entry["logprob"])
+
+    total = sum(raw_probs.values()) or 1e-9
+    normalized = {opt: raw_probs.get(opt, 0.0) / total for opt in answer_options}
+    return normalized
+
+def run_probe_on_item(question_prompt, model_name, num_cuts=15):
+    from metrics import get_cut_points, find_commitment_point
+    
+    full_chain = generate_full_chain(question_prompt, model_name)
+    cut_points = get_cut_points(full_chain, num_cuts=num_cuts)
+
+    trajectory = []
+    for frac, partial in cut_points:
+        probs = probe_cut_point(question_prompt, partial, model_name)
+        trajectory.append((frac, probs))
+
+    commitment_point = find_commitment_point(trajectory)
+    return full_chain, trajectory, commitment_point
+
+def check_stability(question_prompt, model_name, num_runs=5, num_cuts=15):
+    from metrics import summarize_stability
+    
+    results = []
+    for run_num in range(num_runs):
+        _, _, (commit_frac, commit_answer) = run_probe_on_item(
+            question_prompt, model_name, num_cuts=num_cuts
+        )
+        results.append((commit_frac, commit_answer))
+
+    return summarize_stability(results)
+
 def main():
     test_effort_conversion()
     test_ollama_conversion()
@@ -142,11 +214,22 @@ def main():
                 )
                 results.append(result)
 
+                probe_prompt = format_prompt(example, prompt_control=condition["prompt_control"])
+                
+                print("Finding commitment point")
+                full_chain, trajectory, (commit_frac, commit_answer) = run_probe_on_item(
+                    question_prompt=probe_prompt, 
+                    model_name=MODEL, 
+                    num_cuts=3
+                )
+
                 print(f"Model answer: {result['model_answer']}")
                 print(f"Correct answer: {result['correct_answer']}")
-                print(f"Correct: {result['is_correct']}")
+                print(f"Probe final answer: {commit_answer}")
+                print(f"---> Commitment point: {commit_frac*100:.1f}% through the reasoning chain <---")
                 print(f"Thinking chars: {result['thinking_chars']}")
                 print(f"Latency: {result['latency_seconds']:.2f}s")
+                print("-" * 60)
 
             except Exception as e:
                 print(f"ERROR evaluating {example['uid']} with condition {condition_name}:")
