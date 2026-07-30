@@ -1,19 +1,3 @@
-"""Qualitative case study for the PI's feedback: does the model's CoT
-reasoning explicitly name the stereotyped group/trait, and does that
-change across reasoning-effort settings?
-
-This borrows the *idea* behind ADBP (Wu et al., arXiv 2502.15361) -
-locating bias-relevant content inside a reasoning trace - but applies it
-as a small diagnostic sample across the budget axis, per Chenhao's Slack
-reply: "use it just to disambiguate what early commitment means and
-validate our main idea as a qualitative case study."
-
-This is NOT the prefix probe (commitment point / flip rate) - it only
-looks at surface text (does the trace mention the stereotype, and where),
-on a handful of twin pairs, across native reasoning-effort settings. It's
-meant to be read by hand, not treated as a quantitative metric.
-"""
-
 import json
 import random
 import re
