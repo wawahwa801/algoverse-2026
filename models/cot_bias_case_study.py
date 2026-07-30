@@ -154,7 +154,6 @@ def main():
 
     print_summary(results)
     print(f"\nWrote: {RESULTS_PATH}")
-    print("Read the full 'thinking' field per row by hand - this is a case study, not a metric.")
 
 
 if __name__ == "__main__":
