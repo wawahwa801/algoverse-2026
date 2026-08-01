@@ -118,7 +118,7 @@ def save_csv(results, path):
         for result in results:
             writer.writerow({field: result.get(field) for field in fieldnames})
 
-def get_cut_points(full_chain, num_cuts=15):
+def get_cut_points(full_chain, num_cuts=4):
     length = len(full_chain)
     cut_points = []
     for i in range(1, num_cuts + 1):
