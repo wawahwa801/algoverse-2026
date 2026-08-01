@@ -226,7 +226,7 @@ def main():
                 print(f"Model answer: {result['model_answer']}")
                 print(f"Correct answer: {result['correct_answer']}")
                 print(f"Probe final answer: {commit_answer}")
-                print(f"---> Commitment point: {commit_frac*100:.1f}% through the reasoning chain <---")
+                print(f"Commitment point: {commit_frac*100:.1f}% through the reasoning chain")
                 print(f"Thinking chars: {result['thinking_chars']}")
                 print(f"Latency: {result['latency_seconds']:.2f}s")
                 print("-" * 60)
