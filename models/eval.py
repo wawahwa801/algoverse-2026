@@ -326,12 +326,19 @@ def run_probe_on_item(
     model_name,
     num_cuts=4,
     max_tokens=2048,
+    full_chain=None,
 ):
-    full_chain = generate_full_chain(
-        question_prompt,
-        model_name,
-        max_tokens=max_tokens,
-    )
+    # Reuse the reasoning already produced for the recorded answer instead of
+    # generating a second, independent chain - the two were separate samples
+    # that could disagree, and doing this twice was half the calls per task.
+    # Only conditions that produce no reasoning at all (no full_chain) fall
+    # back to a fresh raw-completion generation.
+    if not full_chain:
+        full_chain = generate_full_chain(
+            question_prompt,
+            model_name,
+            max_tokens=max_tokens,
+        )
 
     cut_points = get_cut_points(
         full_chain,
@@ -458,6 +465,7 @@ def process_example_condition(
             model_name=model_name,
             num_cuts=PROBE_CUTS,
             max_tokens=probing_max_tokens,
+            full_chain=result.get("thinking"),
         )
 
         commit_frac, commit_answer = (

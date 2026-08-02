@@ -17,7 +17,7 @@ def load_bbq(path):
 def get_answer_metadata(example):
     answer_groups = example["answer_groups"]
     stereotyped_groups = set(example["stereotyped_groups"])
-    
+
     stereotype_index = None
     anti_stereotype_index = None
     unknown_index = None
@@ -30,6 +30,19 @@ def get_answer_metadata(example):
             stereotype_index = index
         else:
             anti_stereotype_index = index
+
+    # answer_groups labels don't always share vocabulary with
+    # stereotyped_groups (e.g. "F-Black" vs "Black"), which silently drops
+    # stereotype_index to None on ~73% of rows across 6 categories. target_loc
+    # is BBQ's own precomputed stereotype-aligned index and doesn't have this
+    # mismatch problem, so prefer it whenever it's present.
+    target_loc = example.get("target_loc")
+    if target_loc is not None:
+        stereotype_index = target_loc
+        for index_string in answer_groups:
+            index = int(index_string)
+            if index != unknown_index and index != target_loc:
+                anti_stereotype_index = index
 
     return {
         "stereotype_index": stereotype_index,
