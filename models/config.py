@@ -1,7 +1,7 @@
 from effort import ReasoningEffort
 from pathlib import Path
 
-MODEL = "qwen3:4b"
+MODEL = "qwen3.5:9b"
 DATASET_PATH = Path("bbq_subset.jsonl")
 RESULTS_JSON = Path("results/bbq_results.json")
 RESULTS_CSV = Path("results/bbq_results.csv")
