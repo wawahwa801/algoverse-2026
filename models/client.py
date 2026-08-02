@@ -43,6 +43,11 @@ class Qwen3Client:
 
     DEFAULT_MODEL = "qwen3:4b"
     DEFAULT_HOST = "http://127.0.0.1:11434"
+    # Ollama defaults num_ctx to 4096 regardless of what the model supports,
+    # which silently truncates long reasoning chains (and, worse, the START
+    # of the prompt when a request already exceeds it). Raise it so uncapped
+    # native-effort/prompt conditions don't get cut off mid-reasoning.
+    DEFAULT_NUM_CTX = 16384
 
     def __init__(
         self,
@@ -117,17 +122,13 @@ class Qwen3Client:
             **kwargs,
         }
 
+        options = request.get("options", {}).copy()
+        options.setdefault("num_ctx", self.DEFAULT_NUM_CTX)
 
         if max_tokens is not None:
-
-            options = request.get(
-                "options",
-                {}
-            ).copy()
-
             options["num_predict"] = max_tokens
 
-            request["options"] = options
+        request["options"] = options
 
         return request
 

@@ -18,7 +18,7 @@ from eval import build_conditions, process_example_condition, normalize_dataset
 
 TASKS_PER_LEVEL = 12
 CONCURRENCY_LEVELS = [2, 4]
-CALLS_PER_TASK = 6  # 1 evaluate_example + 1 full-chain regen + PROBE_CUTS(4) probes
+CALLS_PER_TASK = 5  # 1 evaluate_example (reused as full chain) + PROBE_CUTS(4) probes
 
 
 def run_level(tasks, concurrency):

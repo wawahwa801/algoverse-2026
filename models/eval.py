@@ -41,6 +41,11 @@ PROBE_CUTS = 4
 TOP_LOGPROBS = 4
 KEEP_ALIVE = "24h"
 CHECKPOINT_INTERVAL = 50
+# Ollama defaults num_ctx to 4096; probe_cut_point concatenates the question
+# prompt with the full partial reasoning trace, which can exceed that on
+# longer chains and get silently truncated from the front (keep=4), dropping
+# the actual question. Match client.py's raised default here too.
+NUM_CTX = 16384
 
 _thread_local = threading.local()
 
@@ -247,6 +252,7 @@ def generate_full_chain(
         options={
             "temperature": 0.7,
             "num_predict": max_tokens,
+            "num_ctx": NUM_CTX,
         },
     )
 
@@ -274,6 +280,7 @@ def probe_cut_point(
         options={
             "temperature": 0.0,
             "num_predict": 1,
+            "num_ctx": NUM_CTX,
         },
         logprobs=True,
         top_logprobs=TOP_LOGPROBS,
