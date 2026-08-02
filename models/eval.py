@@ -1,7 +1,6 @@
 import time
 import math
 import threading
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import ollama
@@ -9,13 +8,13 @@ import ollama
 from client import Qwen3Client, Qwen3Response
 from config import (
     MODEL,
+    DATASET_PATH,
     RESULTS_JSON,
     RESULTS_CSV,
     NATIVE_EFFORTS,
     BUDGETS,
     PROMPT_CONTROLS,
     BUDGET_THINK_MODES,
-    DATASET_PATH,
     test_effort_conversion,
     test_ollama_conversion,
 )
@@ -35,15 +34,13 @@ from metrics import (
 )
 
 
-
-MAX_EXAMPLES = 4
-
-TASK_WORKERS = 4
+MAX_EXAMPLES = 200
+TASK_WORKERS = 2
 PROBE_WORKERS = 2
 PROBE_CUTS = 4
-PROBE_MAX_TOKENS = 512
-TOP_LOGPROBS = 5
-CHECKPOINT_INTERVAL = 10
+TOP_LOGPROBS = 4
+KEEP_ALIVE = "24h"
+CHECKPOINT_INTERVAL = 50
 
 _thread_local = threading.local()
 
@@ -53,7 +50,6 @@ def get_client(model_name):
         _thread_local.client = Qwen3Client(
             model=model_name
         )
-
     return _thread_local.client
 
 
@@ -70,7 +66,7 @@ def get_full_chain_max_tokens(condition):
             return 512
 
         if effort == "high":
-            return 512
+            return 1024
 
         return 512
 
@@ -80,21 +76,16 @@ def get_full_chain_max_tokens(condition):
         if max_tokens is None:
             return 512
 
-        return min(
-            max_tokens,
-            PROBE_MAX_TOKENS,
-        )
+        return max_tokens
 
     if control_type == "prompt":
-        prompt_control = condition.get(
-            "prompt_control"
-        )
+        prompt_control = condition.get("prompt_control")
 
         if prompt_control == "answer_immediately":
             return 256
 
         if prompt_control == "think_thoroughly":
-            return 512
+            return 1024
 
         return 512
 
@@ -102,7 +93,7 @@ def get_full_chain_max_tokens(condition):
 
 
 def evaluate_example(
-    client: Qwen3Client,
+    client,
     example,
     control_type,
     effort=None,
@@ -125,10 +116,11 @@ def evaluate_example(
     request_effort = effort
 
     if request_effort is None:
-        if think is True:
-            request_effort = "medium"
-        else:
-            request_effort = "off"
+        request_effort = (
+            "medium"
+            if think is True
+            else "off"
+        )
 
     start_time = time.perf_counter()
 
@@ -208,42 +200,36 @@ def build_conditions():
     conditions = []
 
     for effort in NATIVE_EFFORTS:
-        conditions.append(
-            {
-                "control_type": "native_effort",
-                "effort": effort,
-                "max_tokens": None,
-                "prompt_control": None,
-                "think": None,
-            }
-        )
+        conditions.append({
+            "control_type": "native_effort",
+            "effort": effort,
+            "max_tokens": None,
+            "prompt_control": None,
+            "think": None,
+        })
 
     for max_tokens in BUDGETS:
         for think in BUDGET_THINK_MODES:
-            conditions.append(
-                {
-                    "control_type": "budget",
-                    "effort": (
-                        "medium"
-                        if think
-                        else "off"
-                    ),
-                    "max_tokens": max_tokens,
-                    "prompt_control": None,
-                    "think": think,
-                }
-            )
+            conditions.append({
+                "control_type": "budget",
+                "effort": (
+                    "medium"
+                    if think
+                    else "off"
+                ),
+                "max_tokens": max_tokens,
+                "prompt_control": None,
+                "think": think,
+            })
 
     for prompt_control in PROMPT_CONTROLS:
-        conditions.append(
-            {
-                "control_type": "prompt",
-                "effort": "on",
-                "max_tokens": None,
-                "prompt_control": prompt_control,
-                "think": True,
-            }
-        )
+        conditions.append({
+            "control_type": "prompt",
+            "effort": "on",
+            "max_tokens": None,
+            "prompt_control": prompt_control,
+            "think": True,
+        })
 
     return conditions
 
@@ -251,12 +237,13 @@ def build_conditions():
 def generate_full_chain(
     question_prompt,
     model_name,
-    max_tokens=512,
+    max_tokens=2048,
 ):
     response = ollama.generate(
         model=model_name,
         prompt=question_prompt,
         raw=True,
+        keep_alive=KEEP_ALIVE,
         options={
             "temperature": 0.7,
             "num_predict": max_tokens,
@@ -283,6 +270,7 @@ def probe_cut_point(
         model=model_name,
         prompt=forced_prompt,
         raw=True,
+        keep_alive=KEEP_ALIVE,
         options={
             "temperature": 0.0,
             "num_predict": 1,
@@ -310,20 +298,19 @@ def probe_cut_point(
     raw_probs = {}
 
     for entry in top_logprobs:
-        token_str = entry["token"].strip()
+        token_str = entry.get(
+            "token",
+            ""
+        ).strip()
 
         if token_str in answer_options:
             raw_probs[token_str] = math.exp(
                 entry["logprob"]
             )
 
-    total = sum(raw_probs.values())
-
-    if total <= 0:
-        return {
-            option: 0.0
-            for option in answer_options
-        }
+    total = sum(
+        raw_probs.values()
+    ) or 1e-9
 
     return {
         option: raw_probs.get(
@@ -338,7 +325,7 @@ def run_probe_on_item(
     question_prompt,
     model_name,
     num_cuts=4,
-    max_tokens=512,
+    max_tokens=2048,
 ):
     full_chain = generate_full_chain(
         question_prompt,
@@ -351,7 +338,9 @@ def run_probe_on_item(
         num_cuts=num_cuts,
     )
 
-    trajectory = [None] * len(cut_points)
+    trajectory = [None] * len(
+        cut_points
+    )
 
     with ThreadPoolExecutor(
         max_workers=PROBE_WORKERS
@@ -361,13 +350,13 @@ def run_probe_on_item(
 
         for index, (
             frac,
-            partial,
+            partial_reasoning,
         ) in enumerate(cut_points):
 
             future = executor.submit(
                 probe_cut_point,
                 question_prompt,
-                partial,
+                partial_reasoning,
                 model_name,
             )
 
@@ -376,16 +365,16 @@ def run_probe_on_item(
                 frac,
             )
 
-        for future in as_completed(futures):
+        for future in as_completed(
+            futures
+        ):
             index, frac = futures[
                 future
             ]
 
-            probs = future.result()
-
             trajectory[index] = (
                 frac,
-                probs,
+                future.result(),
             )
 
     commitment_point = find_commitment_point(
@@ -408,25 +397,23 @@ def process_example_condition(
         model_name
     )
 
-    condition_name = get_condition_name(
-        {
-            "control_type": condition[
-                "control_type"
-            ],
-            "effort": condition[
-                "effort"
-            ],
-            "max_tokens": condition[
-                "max_tokens"
-            ],
-            "prompt_control": condition[
-                "prompt_control"
-            ],
-            "think": condition[
-                "think"
-            ],
-        }
-    )
+    condition_name = get_condition_name({
+        "control_type": condition[
+            "control_type"
+        ],
+        "effort": condition[
+            "effort"
+        ],
+        "max_tokens": condition[
+            "max_tokens"
+        ],
+        "prompt_control": condition[
+            "prompt_control"
+        ],
+        "think": condition[
+            "think"
+        ],
+    })
 
     try:
         result = evaluate_example(
@@ -465,7 +452,7 @@ def process_example_condition(
         (
             full_chain,
             trajectory,
-            commitment,
+            commitment_point,
         ) = run_probe_on_item(
             question_prompt=probe_prompt,
             model_name=model_name,
@@ -474,7 +461,7 @@ def process_example_condition(
         )
 
         commit_frac, commit_answer = (
-            commitment
+            commitment_point
         )
 
         result[
@@ -497,14 +484,29 @@ def process_example_condition(
 
     except Exception as e:
         print(
-            f"ERROR processing "
-            f"UID={example['uid']} "
-            f"condition={condition_name}: "
-            f"{e}"
+            f"ERROR processing UID="
+            f"{example['uid']} "
+            f"with condition "
+            f"{condition_name}: {e}"
         )
 
         return {
             "uid": example["uid"],
+            "category": example.get(
+                "category"
+            ),
+            "subcategory": example.get(
+                "subcategory"
+            ),
+            "question_index": example.get(
+                "question_index"
+            ),
+            "question_polarity": example.get(
+                "question_polarity"
+            ),
+            "context_condition": example.get(
+                "context_condition"
+            ),
             "control_type": condition[
                 "control_type"
             ],
@@ -526,14 +528,46 @@ def process_example_condition(
 
 def save_checkpoint(results):
     try:
+        RESULTS_JSON.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
         save_json(
             results,
             RESULTS_JSON,
         )
+
     except Exception as e:
         print(
             f"Checkpoint save failed: {e}"
         )
+
+
+def normalize_dataset(dataset):
+    if not isinstance(dataset, list):
+        return dataset
+
+    if len(dataset) == 0:
+        return dataset
+
+    first = dataset[0]
+
+    if isinstance(first, dict):
+        return dataset
+
+    if isinstance(first, list):
+        flattened = []
+
+        for item in dataset:
+            if isinstance(item, list):
+                flattened.extend(item)
+            elif isinstance(item, dict):
+                flattened.append(item)
+
+        return flattened
+
+    return dataset
 
 
 def main():
@@ -544,16 +578,14 @@ def main():
     print()
     print("Loading BBQ dataset...")
 
-    dataset = load_bbq(
-        DATASET_PATH
-    )
+    dataset = load_bbq(DATASET_PATH)
+
+    dataset = normalize_dataset(dataset)
 
     original_count = len(dataset)
 
     if MAX_EXAMPLES is not None:
-        dataset = dataset[
-            :MAX_EXAMPLES
-        ]
+        dataset = dataset[:MAX_EXAMPLES]
 
     print(
         f"Loaded {original_count} examples."
@@ -563,26 +595,32 @@ def main():
         f"Using {len(dataset)} examples."
     )
 
-    if len(dataset) % 2 != 0:
-        print(
-            "WARNING: dataset size is odd; "
-            "the final pair may be incomplete."
+    if dataset and not isinstance(
+        dataset[0],
+        dict,
+    ):
+        raise TypeError(
+            "load_bbq() did not return "
+            "BBQ dictionaries after "
+            "normalization. "
+            f"First item type: "
+            f"{type(dataset[0])}"
         )
 
     ambiguous_count = sum(
         1
         for example in dataset
-        if example[
+        if example.get(
             "context_condition"
-        ] == "ambig"
+        ) == "ambig"
     )
 
     disambiguated_count = sum(
         1
         for example in dataset
-        if example[
+        if example.get(
             "context_condition"
-        ] == "disambig"
+        ) == "disambig"
     )
 
     print(
@@ -616,45 +654,12 @@ def main():
         f"Conditions: "
         f"{len(conditions)}"
     )
-
-    print(
-        f"Task workers: "
-        f"{TASK_WORKERS}"
-    )
-
-    print(
-        f"Probe workers: "
-        f"{PROBE_WORKERS}"
-    )
-
-    print(
-        f"Probe cuts: "
-        f"{PROBE_CUTS}"
-    )
-
-    print(
-        f"Probe max tokens: "
-        f"{PROBE_MAX_TOKENS}"
-    )
-
-    print(
-        f"Top logprobs: "
-        f"{TOP_LOGPROBS}"
-    )
-
-    print(
-        f"Total tasks: "
-        f"{total_tasks}"
-    )
-
     print(
         f"Estimated model calls: "
         f"{estimated_calls}"
     )
 
     print()
-
-    all_results = []
 
     tasks = [
         (
@@ -665,9 +670,11 @@ def main():
         for condition in conditions
     ]
 
-    tasks_completed = 0
+    all_results = []
 
     start_time = time.perf_counter()
+
+    tasks_completed = 0
 
     with ThreadPoolExecutor(
         max_workers=TASK_WORKERS
@@ -705,7 +712,7 @@ def main():
             except Exception as e:
                 print(
                     f"Worker error for "
-                    f"{example['uid']}: "
+                    f"UID={example['uid']}: "
                     f"{e}"
                 )
 
@@ -760,17 +767,6 @@ def main():
         - start_time
     )
 
-    print()
-    print(
-        f"Finished processing "
-        f"{len(all_results)} results."
-    )
-
-    print(
-        f"Total runtime: "
-        f"{total_elapsed / 60:.2f} minutes"
-    )
-
     RESULTS_JSON.parent.mkdir(
         parents=True,
         exist_ok=True,
@@ -789,6 +785,17 @@ def main():
     save_csv(
         all_results,
         RESULTS_CSV,
+    )
+
+    print()
+    print(
+        f"Finished processing "
+        f"{len(all_results)} results."
+    )
+
+    print(
+        f"Total runtime: "
+        f"{total_elapsed / 60:.2f} minutes"
     )
 
     print(
