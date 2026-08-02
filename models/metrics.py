@@ -54,7 +54,7 @@ def load_results(path):
                     if value.strip() == "":
                         record[field] = None
                     else:
-                        record[field] = int(value)
+                        record[field] = int(float(value))
 
                 else:
                     record[field] = None
@@ -482,7 +482,7 @@ def print_summary(results):
 
 def main():
     records = load_results(
-        "algoverse-2026/models/results/bbq_results.csv"
+        "results/bbq_results.csv"
     )
 
     unique_uids = set()
