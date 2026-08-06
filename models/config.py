@@ -1,7 +1,32 @@
-from effort import ReasoningEffort
+import os
 from pathlib import Path
 
-MODEL = "qwen3.5:9b"
+from effort import ReasoningEffort
+
+
+def _load_env_file() -> None:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+_load_env_file()
+
+MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "ollama")
+MODEL = os.getenv("MODEL", "qwen3.5:9b")
+
+API_KEY = os.getenv("API_KEY", "")
+BASE_URL = os.getenv("BASE_URL", "")
+
 DATASET_PATH = Path("bbq_subset.jsonl")
 RESULTS_JSON = Path("results/bbq_results.json")
 RESULTS_CSV = Path("results/bbq_results.csv")
