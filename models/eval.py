@@ -2,13 +2,14 @@ import time
 import math
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import ollama
 
+from bbq_sample import load_jsonl, build_items
 from client import Qwen3Client, Qwen3Response
 from config import (
     MODEL,
-    DATASET_PATH,
     RESULTS_JSON,
     RESULTS_CSV,
     NATIVE_EFFORTS,
@@ -19,7 +20,6 @@ from config import (
     test_ollama_conversion,
 )
 from util import (
-    load_bbq,
     get_answer_metadata,
     format_prompt,
     parse_answer,
@@ -34,7 +34,11 @@ from metrics import (
 )
 
 
-MAX_EXAMPLES = 200
+DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
+PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset.jsonl"
+CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
+
+MAX_EXAMPLES = None
 TASK_WORKERS = 2
 PROBE_WORKERS = 2
 PROBE_CUTS = 4
@@ -559,6 +563,16 @@ def save_checkpoint(results):
         )
 
 
+def load_twin_pair_dataset():
+    """Load the team's fixed ~1000-pair twin subset and expand each pair into
+    two scoreable items via bbq_sample.build_items (context swapped to the
+    twin's version, base answer metadata from bbq_clean)."""
+    twins = load_jsonl(PAIRS_DATASET_PATH)
+    clean = load_jsonl(CLEAN_DATASET_PATH)
+    clean_by_uid = {row["uid"]: row for row in clean}
+    return build_items(twins, clean_by_uid)
+
+
 def normalize_dataset(dataset):
     if not isinstance(dataset, list):
         return dataset
@@ -591,9 +605,9 @@ def main():
 
     print("good conversion")
     print()
-    print("Loading BBQ dataset...")
+    print("Loading BBQ twin-pair dataset...")
 
-    dataset = load_bbq(DATASET_PATH)
+    dataset = load_twin_pair_dataset()
 
     dataset = normalize_dataset(dataset)
 
@@ -615,7 +629,7 @@ def main():
         dict,
     ):
         raise TypeError(
-            "load_bbq() did not return "
+            "load_twin_pair_dataset() did not return "
             "BBQ dictionaries after "
             "normalization. "
             f"First item type: "
@@ -656,7 +670,7 @@ def main():
     )
 
     calls_per_task = (
-        2 + PROBE_CUTS
+        1 + PROBE_CUTS
     )
 
     estimated_calls = (

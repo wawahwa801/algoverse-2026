@@ -12,9 +12,8 @@ to decide TASK_WORKERS for the real sweep.
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import MODEL, DATASET_PATH
-from util import load_bbq
-from eval import build_conditions, process_example_condition, normalize_dataset
+from config import MODEL
+from eval import build_conditions, process_example_condition, normalize_dataset, load_twin_pair_dataset
 
 TASKS_PER_LEVEL = 12
 CONCURRENCY_LEVELS = [2, 4]
@@ -39,7 +38,7 @@ def run_level(tasks, concurrency):
 
 
 def main():
-    dataset = normalize_dataset(load_bbq(DATASET_PATH))
+    dataset = normalize_dataset(load_twin_pair_dataset())
     conditions = build_conditions()
 
     print(f"Model: {MODEL}")
