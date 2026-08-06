@@ -31,11 +31,13 @@ from metrics import (
     save_csv,
     get_cut_points,
     find_commitment_point,
+    keyword_terms,
+    find_mentions,
 )
 
 
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
-PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset.jsonl"
+PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700.jsonl"
 CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
 
 MAX_EXAMPLES = None
@@ -452,6 +454,32 @@ def process_example_condition(
             think=condition[
                 "think"
             ],
+        )
+
+        thinking_text = result.get("thinking") or ""
+
+        stereotype_terms = keyword_terms(
+            example, result["stereotype_index"]
+        )
+        anti_stereotype_terms = keyword_terms(
+            example, result["anti_stereotype_index"]
+        )
+        stereotype_mentions = find_mentions(
+            thinking_text, stereotype_terms
+        )
+        anti_stereotype_mentions = find_mentions(
+            thinking_text, anti_stereotype_terms
+        )
+
+        result["stereotype_mentions"] = stereotype_mentions
+        result["anti_stereotype_mentions"] = anti_stereotype_mentions
+        result["first_stereotype_mention_pct"] = (
+            stereotype_mentions[0]["pct_through_reasoning"]
+            if stereotype_mentions else None
+        )
+        result["first_anti_stereotype_mention_pct"] = (
+            anti_stereotype_mentions[0]["pct_through_reasoning"]
+            if anti_stereotype_mentions else None
         )
 
         probe_prompt = format_prompt(

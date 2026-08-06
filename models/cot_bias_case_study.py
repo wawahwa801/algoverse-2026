@@ -1,11 +1,11 @@
 import json
 import random
-import re
 from pathlib import Path
 
 from bbq_sample import load_jsonl, CLEAN_PATH, TWINS_PATH
 from client import Qwen3Client
 from eval import format_prompt, get_answer_metadata, parse_answer
+from metrics import keyword_terms, find_mentions
 
 MODEL = "qwen3.5:9b"
 EFFORTS = ["low", "medium", "high"]
@@ -19,34 +19,6 @@ def sample_pairs(twins, n, seed):
     twins = twins[:]
     rng.shuffle(twins)
     return twins[:n]
-
-
-def keyword_terms(example, index):
-    """Terms that would indicate the reasoning is invoking this answer's
-    demographic group - the answer's own noun phrase, plus its group
-    label (e.g. "old"/"nonOld"), skipping "unknown"."""
-    if index is None:
-        return []
-    answer_text = example["answers"].get(str(index), "")
-    group_label = example["answer_groups"].get(str(index), "")
-    terms = set()
-    cleaned = re.sub(r"^(the|a|an)\s+", "", answer_text.strip(), flags=re.I)
-    if cleaned:
-        terms.add(cleaned.lower())
-    if group_label and group_label.lower() != "unknown":
-        terms.add(group_label.lower())
-    return sorted(terms)
-
-
-def find_mentions(text, terms):
-    mentions = []
-    for term in terms:
-        for match in re.finditer(re.escape(term), text, re.I):
-            mentions.append({
-                "term": term,
-                "pct_through_reasoning": round(100 * match.start() / max(len(text), 1), 1),
-            })
-    return sorted(mentions, key=lambda m: m["pct_through_reasoning"])
 
 
 def run_item(client, example, effort):
