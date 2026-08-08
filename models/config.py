@@ -1,35 +1,27 @@
-import os
+from effort import ReasoningEffort
 from pathlib import Path
 
-from effort import ReasoningEffort
+MODEL = "qwen3.5:9b"
+
+# Per-model backend routing (models/eval.py::get_client) and result paths,
+# so switching MODEL and rerunning never overwrites another model's output.
+# Models absent from this registry default to the Ollama backend using the
+# model name as-is (preserves the original single-model behavior).
+MODEL_PROFILES = {
+    "qwen3.5:9b": {"backend": "ollama", "model_id": "qwen3.5:9b"},
+    "gpt-oss:20b": {"backend": "ollama", "model_id": "gpt-oss:20b"},
+    "glm-5.2": {"backend": "openrouter", "model_id": "z-ai/glm-5.2"},
+    "kimi-k3": {"backend": "openrouter", "model_id": "moonshotai/kimi-k3"},
+}
 
 
-def _load_env_file() -> None:
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if not env_path.exists():
-        return
+def _model_slug(model_name):
+    return model_name.replace(":", "-").replace("/", "-")
 
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
-
-
-_load_env_file()
-
-MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "ollama")
-MODEL = os.getenv("MODEL", "qwen3.5:9b")
-
-API_KEY = os.getenv("API_KEY", "")
-BASE_URL = os.getenv("BASE_URL", "")
 
 DATASET_PATH = Path("bbq_subset.jsonl")
-RESULTS_JSON = Path("results/bbq_results.json")
-RESULTS_CSV = Path("results/bbq_results.csv")
+RESULTS_JSON = Path(f"results/bbq_results_{_model_slug(MODEL)}.json")
+RESULTS_CSV = Path(f"results/bbq_results_{_model_slug(MODEL)}.csv")
 
 NATIVE_EFFORTS = ["low", "medium", "high"]
 BUDGETS = [128, 512, 1024]

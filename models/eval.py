@@ -1,3 +1,4 @@
+import json
 import time
 import math
 import threading
@@ -8,8 +9,10 @@ import ollama
 
 from bbq_sample import load_jsonl, build_items
 from client import Qwen3Client, Qwen3Response
+from openrouter_client import OpenRouterModelClient
 from config import (
     MODEL,
+    MODEL_PROFILES,
     RESULTS_JSON,
     RESULTS_CSV,
     NATIVE_EFFORTS,
@@ -36,7 +39,7 @@ from metrics import (
 
 
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
-PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700.jsonl"
+PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700_clean.jsonl"
 CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
 
 MAX_EXAMPLES = None
@@ -55,11 +58,26 @@ NUM_CTX = 16384
 _thread_local = threading.local()
 
 
+def get_model_profile(model_name):
+    return MODEL_PROFILES.get(
+        model_name,
+        {"backend": "ollama", "model_id": model_name},
+    )
+
+
 def get_client(model_name):
     if not hasattr(_thread_local, "client"):
-        _thread_local.client = Qwen3Client(
-            model=model_name
-        )
+        profile = get_model_profile(model_name)
+
+        if profile["backend"] == "openrouter":
+            _thread_local.client = OpenRouterModelClient(
+                model_id=profile["model_id"]
+            )
+        else:
+            _thread_local.client = Qwen3Client(
+                model=profile["model_id"]
+            )
+
     return _thread_local.client
 
 
@@ -324,6 +342,61 @@ def probe_cut_point(
     }
 
 
+def probe_cut_point_openrouter(
+    question_prompt,
+    partial_reasoning,
+    model_name,
+    answer_options=("0", "1", "2"),
+):
+    """Same forced-continuation probe as probe_cut_point, but over the
+    OpenRouter chat API via an OpenRouterModelClient. Not all upstream
+    providers return logprobs even when requested - callers should treat an
+    all-zero result the same way as the Ollama path's empty-logprobs case.
+
+    Resolves its own thread-local client via get_client(model_name) rather
+    than taking one as an argument - OpenRouterModelClient owns a single
+    asyncio event loop, which is not safe to share across the threads in
+    run_probe_on_item's PROBE_WORKERS pool. get_client() must run inside
+    the worker thread that will actually use the client, not the caller's."""
+    client = get_client(model_name)
+
+    forced_prompt = (
+        question_prompt
+        + partial_reasoning
+        + "\n\nBased on the above, "
+        "the answer is number ("
+    )
+
+    logprobs = client.probe_logprobs(
+        forced_prompt, top_logprobs=TOP_LOGPROBS
+    )
+
+    content = (logprobs or {}).get("content") or []
+
+    if not content:
+        return {
+            option: 0.0
+            for option in answer_options
+        }
+
+    top_logprobs = content[0].get("top_logprobs", [])
+
+    raw_probs = {}
+
+    for entry in top_logprobs:
+        token_str = (entry.get("token") or "").strip()
+
+        if token_str in answer_options:
+            raw_probs[token_str] = math.exp(entry["logprob"])
+
+    total = sum(raw_probs.values()) or 1e-9
+
+    return {
+        option: raw_probs.get(option, 0.0) / total
+        for option in answer_options
+    }
+
+
 def run_probe_on_item(
     question_prompt,
     model_name,
@@ -352,6 +425,8 @@ def run_probe_on_item(
         cut_points
     )
 
+    backend = get_model_profile(model_name)["backend"]
+
     with ThreadPoolExecutor(
         max_workers=PROBE_WORKERS
     ) as executor:
@@ -363,12 +438,20 @@ def run_probe_on_item(
             partial_reasoning,
         ) in enumerate(cut_points):
 
-            future = executor.submit(
-                probe_cut_point,
-                question_prompt,
-                partial_reasoning,
-                model_name,
-            )
+            if backend == "openrouter":
+                future = executor.submit(
+                    probe_cut_point_openrouter,
+                    question_prompt,
+                    partial_reasoning,
+                    model_name,
+                )
+            else:
+                future = executor.submit(
+                    probe_cut_point,
+                    question_prompt,
+                    partial_reasoning,
+                    model_name,
+                )
 
             futures[future] = (
                 index,
@@ -718,6 +801,36 @@ def main():
     ]
 
     all_results = []
+    completed_keys = set()
+
+    if RESULTS_JSON.exists():
+        with open(RESULTS_JSON, "r", encoding="utf-8") as f:
+            existing_results = json.load(f)
+
+        for result in existing_results:
+            if "error" in result:
+                continue
+            all_results.append(result)
+            completed_keys.add((
+                result["uid"],
+                get_condition_name(result),
+                result["model"],
+            ))
+
+        tasks = [
+            (example, condition)
+            for example, condition in tasks
+            if (
+                example["uid"],
+                get_condition_name(condition),
+                MODEL,
+            ) not in completed_keys
+        ]
+
+        print(
+            f"Resuming: {len(completed_keys)} task(s) "
+            f"already completed, {len(tasks)} remaining."
+        )
 
     start_time = time.perf_counter()
 
