@@ -14,7 +14,6 @@ from config import (
     RESULTS_CSV,
     NATIVE_EFFORTS,
     BUDGETS,
-    PROMPT_CONTROLS,
     BUDGET_THINK_MODES,
     test_effort_conversion,
     test_ollama_conversion,
@@ -233,15 +232,6 @@ def build_conditions():
                 "think": think,
             })
 
-    for prompt_control in PROMPT_CONTROLS:
-        conditions.append({
-            "control_type": "prompt",
-            "effort": "on",
-            "max_tokens": None,
-            "prompt_control": prompt_control,
-            "think": True,
-        })
-
     return conditions
 
 
@@ -269,7 +259,7 @@ def probe_cut_point(
     question_prompt,
     partial_reasoning,
     model_name,
-    answer_options=("1", "2", "3"),
+    answer_options=("0", "1", "2"),
 ):
     forced_prompt = (
         question_prompt

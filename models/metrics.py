@@ -450,7 +450,9 @@ def save_csv(results, path):
         "prompt_control", "think", "model_answer", "correct_answer", "is_correct",
         "selected_unknown", "selected_stereotype", "selected_anti_stereotype",
         "unknown_index", "stereotype_index", "anti_stereotype_index", "content",
-        "thinking_chars", "latency_seconds"
+        "thinking_chars", "latency_seconds", "probe_final_answer",
+        "commitment_point_frac", "first_stereotype_mention_pct",
+        "first_anti_stereotype_mention_pct",
     ]
 
     with open(path, "w", newline="", encoding="utf-8") as file:
