@@ -7,7 +7,7 @@ from pathlib import Path
 
 import ollama
 
-from bbq_sample import load_jsonl, build_items
+from bbq_sample import load_jsonl
 from client import Qwen3Client, Qwen3Response
 from openrouter_client import OpenRouterModelClient
 from config import (
@@ -20,6 +20,15 @@ from config import (
     BUDGET_THINK_MODES,
     test_effort_conversion,
     test_ollama_conversion,
+    MAX_EXAMPLES,
+    TASK_WORKERS,
+    PROBE_WORKERS,
+    PROBE_CUTS,
+    TOP_LOGPROBS,
+    KEEP_ALIVE,
+    CHECKPOINT_INTERVAL,
+    NUM_CTX,
+    SUBSET_DATASET_PATH,
 )
 from util import (
     get_answer_metadata,
@@ -38,22 +47,7 @@ from metrics import (
 )
 
 
-DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
-PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700_clean.jsonl"
-CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
 
-MAX_EXAMPLES = None
-TASK_WORKERS = 2
-PROBE_WORKERS = 2
-PROBE_CUTS = 4
-TOP_LOGPROBS = 4
-KEEP_ALIVE = "24h"
-CHECKPOINT_INTERVAL = 50
-# Ollama defaults num_ctx to 4096; probe_cut_point concatenates the question
-# prompt with the full partial reasoning trace, which can exceed that on
-# longer chains and get silently truncated from the front (keep=4), dropping
-# the actual question. Match client.py's raised default here too.
-NUM_CTX = 16384
 
 _thread_local = threading.local()
 
@@ -665,13 +659,8 @@ def save_checkpoint(results):
 
 
 def load_twin_pair_dataset():
-    """Load the team's fixed ~1000-pair twin subset and expand each pair into
-    two scoreable items via bbq_sample.build_items (context swapped to the
-    twin's version, base answer metadata from bbq_clean)."""
-    twins = load_jsonl(PAIRS_DATASET_PATH)
-    clean = load_jsonl(CLEAN_DATASET_PATH)
-    clean_by_uid = {row["uid"]: row for row in clean}
-    return build_items(twins, clean_by_uid)
+    """Load the fixed subset dataset from the checked-in BBQ subset file."""
+    return load_jsonl(SUBSET_DATASET_PATH)
 
 
 def normalize_dataset(dataset):

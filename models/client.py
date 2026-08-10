@@ -11,10 +11,7 @@ from ollama import ChatResponse, Client
 from effort import OllamaThink, ReasoningEffort
 from config import (
     MODEL as DEFAULT_MODEL_NAME,
-    MODEL_PROVIDER as DEFAULT_MODEL_PROVIDER,
-    OPENAI_API_KEY as DEFAULT_OPENAI_API_KEY,
-    OPENAI_BASE_URL as DEFAULT_OPENAI_BASE_URL,
-    OPENAI_MODEL as DEFAULT_OPENAI_MODEL,
+    MODEL_PROFILES,
 )
 
 
@@ -49,41 +46,57 @@ class Qwen3StreamChunk:
 
 class Qwen3Client:
 
-    DEFAULT_MODEL = "qwen3:4b"
     DEFAULT_HOST = "http://127.0.0.1:11434"
-    # Ollama defaults num_ctx to 4096 regardless of what the model supports,
-    # which silently truncates long reasoning chains (and, worse, the START
-    # of the prompt when a request already exceeds it). Raise it so uncapped
-    # native-effort/prompt conditions don't get cut off mid-reasoning.
+    DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     DEFAULT_NUM_CTX = 16384
 
     def __init__(
         self,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         *,
         host: str | None = None,
         timeout: float | None = None,
-        provider: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        provider: str | None = None,
     ) -> None:
-        self.provider = self._resolve_provider(provider)
-        if self.provider == "openai" and model in {self.DEFAULT_MODEL, DEFAULT_MODEL_NAME}:
-            model = DEFAULT_OPENAI_MODEL
-        self.model = model
-        self.host = (host or self.DEFAULT_HOST).rstrip("/")
-        self.timeout = timeout
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY", DEFAULT_OPENAI_API_KEY)
-        self.base_url = (base_url or os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)).rstrip("/")
-        self._client = Client(host=self.host, timeout=timeout)
+        selected_model_key = model or DEFAULT_MODEL_NAME
 
-    def _resolve_provider(self, provider: str | None) -> str:
-        if provider is None:
-            provider = os.getenv("MODEL_PROVIDER", DEFAULT_MODEL_PROVIDER)
-        provider = str(provider).strip().lower()
-        if provider in {"openai", "openai-compatible", "openai_compatible", "api", "http"}:
-            return "openai"
-        return "ollama"
+        profile = MODEL_PROFILES.get(selected_model_key, {})
+        backend = (provider or profile.get("backend") or "ollama").lower()
+
+        self.backend = backend
+        self.model_id = profile.get("model_id", selected_model_key)
+        self.model = selected_model_key
+        self.timeout = timeout
+
+        if self.backend in {"openrouter", "openai"}:
+            self.provider = "openrouter" if self.backend == "openrouter" else "openai"
+
+            self.api_key = (
+                api_key
+                or profile.get("api_key")
+                or os.getenv("OPENROUTER_API_KEY")
+                or os.getenv("OPENAI_API_KEY", "")
+            )
+
+            default_url = (
+                self.DEFAULT_OPENROUTER_BASE_URL
+                if self.backend == "openrouter"
+                else "https://api.openai.com/v1"
+            )
+            self.base_url = (
+                base_url
+                or profile.get("base_url")
+                or os.getenv("OPENROUTER_BASE_URL")
+                or default_url
+            ).rstrip("/")
+        else:
+            self.provider = "ollama"
+            self.host = (host or profile.get("host") or self.DEFAULT_HOST).rstrip("/")
+            self.api_key = ""
+            self.base_url = ""
+            self._client = Client(host=self.host, timeout=timeout)
 
     def chat(
         self,
@@ -95,8 +108,8 @@ class Qwen3Client:
     ) -> Qwen3Response | Iterator[Qwen3StreamChunk]:
         resolved_effort = ReasoningEffort.from_value(effort)
 
-        if self.provider == "openai":
-            return self._chat_openai(messages, resolved_effort, **kwargs)
+        if self.provider in {"openrouter", "openai"}:
+            return self._chat_openrouter(messages, resolved_effort, **kwargs)
 
         request = self._build_request(messages, resolved_effort, stream=stream, **kwargs)
 
@@ -139,11 +152,10 @@ class Qwen3Client:
         max_tokens: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-
         think: OllamaThink = effort.to_ollama_think()
 
         request = {
-            "model": self.model,
+            "model": self.model_id,
             "messages": list(messages),
             "think": think,
             "stream": stream,
@@ -169,7 +181,7 @@ class Qwen3Client:
         response.raise_for_status()
         return response.json()
 
-    def _build_openai_request(
+    def _build_openrouter_request(
         self,
         messages: Messages,
         effort: ReasoningEffort,
@@ -178,7 +190,7 @@ class Qwen3Client:
         **kwargs: Any,
     ) -> dict[str, Any]:
         request = {
-            "model": self.model,
+            "model": self.model_id,
             "messages": list(messages),
             **kwargs,
         }
@@ -188,20 +200,23 @@ class Qwen3Client:
             request.setdefault("reasoning_effort", effort.value)
         return request
 
-    def _chat_openai(
+    def _chat_openrouter(
         self,
         messages: Messages,
         effort: ReasoningEffort,
         **kwargs: Any,
     ) -> Qwen3Response:
         if not self.api_key:
-            raise ValueError("OPENAI_API_KEY is required when MODEL_PROVIDER=openai")
+            raise ValueError(
+                f"API Key is required for provider '{self.provider}' (Model: {self.model_id}). "
+                "Provide it in MODEL_PROFILES or via environment variables."
+            )
 
-        request = self._build_openai_request(messages, effort, **kwargs)
-        payload = self._post_openai(request)
-        return self._to_openai_response(payload, effort)
+        request = self._build_openrouter_request(messages, effort, **kwargs)
+        payload = self._post_openrouter(request)
+        return self._to_openrouter_response(payload, effort)
 
-    def _post_openai(self, request: dict[str, Any]) -> dict[str, Any]:
+    def _post_openrouter(self, request: dict[str, Any]) -> dict[str, Any]:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -227,12 +242,12 @@ class Qwen3Client:
             raw=payload,
         )
 
-    def _to_openai_response(self, payload: dict[str, Any], effort: ReasoningEffort) -> Qwen3Response:
+    def _to_openrouter_response(self, payload: dict[str, Any], effort: ReasoningEffort) -> Qwen3Response:
         choice = payload.get("choices", [{}])[0]
         message = choice.get("message", {})
         return Qwen3Response(
             content=message.get("content") or "",
-            thinking=message.get("thinking"),
+            thinking=message.get("reasoning") or message.get("thinking"),
             effort=effort,
             model=self.model,
             raw=payload,
