@@ -1,5 +1,6 @@
 from core.config.effort import ReasoningEffort
 from pathlib import Path
+import os
 
 MODEL = "qwen3.5:9b"
 
@@ -9,9 +10,22 @@ MODEL = "qwen3.5:9b"
 # model name as-is (preserves the original single-model behavior).
 MODEL_PROFILES = {
     "qwen3.5:9b": {"backend": "ollama", "model_id": "qwen3.5:9b"},
-    #"gpt-oss:20b": {"backend": "ollama", "model_id": "gpt-oss:20b"},
-    #"glm-5.2": {"backend": "openrouter", "model_id": "z-ai/glm-5.2", "api_key": ""},
-    #"kimi-k3": {"backend": "openrouter", "model_id": "moonshotai/kimi-k3", "api_key": ""},
+    "gpt-oss:20b": {"backend": "ollama", "model_id": "gpt-oss:20b"},
+    "glm-5.2": {
+        "backend": "azure",
+        "model_id": "glm-5.2",
+        "resource_name":  "",
+        "deployment_name": "glm-5-2",
+        "api_key":  "",
+    },
+    "kimi-k3": {
+        "backend": "azure",
+        "model_id": "kimi-k3",
+        "resource_name":  "",
+        "deployment_name":  "kimi-k3",
+        "api_key": "",
+    },
+    "grok-4.5": {"backend": "openrouter", "model_id": "xai/grok-4.5", "api_key": ""},
 }
 
 
