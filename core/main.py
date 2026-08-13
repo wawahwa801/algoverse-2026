@@ -8,17 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# models/ uses bare sibling imports throughout (from client import ...),
-# which only resolve when models/ itself is on sys.path - matching how
-# every script inside models/ is actually run, rather than importing it as
-# a proper models.* package (which would trigger models/__init__.py and
-# its own chain of bare imports).
-MODELS_DIR = ROOT / "models"
-if str(MODELS_DIR) not in sys.path:
-    sys.path.insert(0, str(MODELS_DIR))
-
-from core.utility.bbq_sample import load_jsonl
-from bbq_sample import build_items
+from core.utility.bbq_sample import load_jsonl, build_items
 from core.config.config import (
     MODEL,
     RESULTS_JSON,
@@ -52,7 +42,8 @@ def save_checkpoint(results):
 def load_twin_pair_dataset():
     """Load the frozen, opposite-alignment-filtered twin-pair subset (with
     matched ambiguous siblings) - the same canonical dataset models/eval.py
-    uses, via the same build_items() so both packages never diverge."""
+    uses. build_items() is a kept-in-sync local copy
+    (core/utility/bbq_sample.py), not a cross-package import."""
     twins = load_jsonl(PAIRS_DATASET_PATH)
     clean = load_jsonl(CLEAN_DATASET_PATH)
     clean_by_uid = {row["uid"]: row for row in clean}

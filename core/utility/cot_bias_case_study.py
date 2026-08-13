@@ -2,7 +2,8 @@ import json
 import random
 from pathlib import Path
 
-from core.utility.bbq_sample import load_jsonl, CLEAN_PATH, TWINS_PATH
+from core.utility.bbq_sample import load_jsonl, build_items, CLEAN_PATH
+from core.config.config import PAIRS_DATASET_PATH
 from core.clients.olllama_client import Qwen3Client
 from core.utility.util import format_prompt, get_answer_metadata, parse_answer
 from core.evaluation.metrics import keyword_terms, find_mentions
@@ -11,6 +12,12 @@ MODEL = "qwen3.5:9b"
 EFFORTS = ["low", "medium", "high"]
 SAMPLE_PAIRS = 5
 SEED = 0
+# Draw from the same frozen, opposite-alignment subset the main pipeline
+# uses (core/config/config.py::PAIRS_DATASET_PATH) rather than the raw twin
+# pool - keeps this a small, separate case study (per
+# feedback_points_pratham.md, Mentor 1) while guaranteeing every example
+# pair actually tests commitment asymmetry, and picks up each pair's
+# ambiguous sibling for free via bbq_sample.build_items.
 RESULTS_PATH = Path(__file__).resolve().parent / "results" / "cot_bias_case_study.jsonl"
 
 
@@ -59,24 +66,6 @@ def run_item(client, example, effort):
     }
 
 
-def build_items(pairs, clean_by_uid):
-    items = []
-    for pair in pairs:
-        for side, uid_key, context_key in (
-            ("a", "twin_a_uid", "twin_a_context"),
-            ("b", "twin_b_uid", "twin_b_context"),
-        ):
-            base = clean_by_uid.get(pair[uid_key])
-            if base is None:
-                continue
-            example = dict(base)
-            example["context"] = pair[context_key]
-            example["twin_side"] = side
-            example["twin_partner_uid"] = pair["twin_b_uid" if side == "a" else "twin_a_uid"]
-            items.append(example)
-    return items
-
-
 def print_summary(results):
     print()
     print("=" * 80)
@@ -100,7 +89,7 @@ def print_summary(results):
 def main():
     clean = load_jsonl(CLEAN_PATH)
     clean_by_uid = {row["uid"]: row for row in clean}
-    twins = load_jsonl(TWINS_PATH)
+    twins = load_jsonl(PAIRS_DATASET_PATH)
 
     pairs = sample_pairs(twins, SAMPLE_PAIRS, SEED)
     items = build_items(pairs, clean_by_uid)

@@ -65,6 +65,12 @@ PROBE_CUTS = 4
 TOP_LOGPROBS = 4
 KEEP_ALIVE = "24h"
 CHECKPOINT_INTERVAL = 50
+# When True (default), budget-condition tasks that run out of tokens before
+# stating an answer get effective_answer filled in from the probe's forced
+# completion. Set False for runs that need to measure true natural
+# completion rate itself (e.g. a large-budget test) - forcing an answer
+# there would mask exactly the "does the model finish on its own" signal.
+ENABLE_FORCED_ANSWER = True
 # Ollama defaults num_ctx to 4096; probe_cut_point concatenates the question
 # prompt with the full partial reasoning trace, which can exceed that on
 # longer chains and get silently truncated from the front (keep=4), dropping

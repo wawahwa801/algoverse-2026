@@ -7,9 +7,16 @@ import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import eval
 from config import MODEL
 from eval import load_twin_pair_dataset, normalize_dataset, process_example_condition
 from metrics import save_json, save_csv
+
+# This test measures whether the model finishes naturally at each budget -
+# the forced-answer fallback (models/eval.py::ENABLE_FORCED_ANSWER) would
+# mask exactly that signal by silently recovering answers the model didn't
+# actually state in time, so it's off for this run specifically.
+eval.ENABLE_FORCED_ANSWER = False
 
 SAMPLE_PAIRS = 5
 ITEMS_PER_PAIR = 3  # a, b, ambig

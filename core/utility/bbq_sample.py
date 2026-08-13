@@ -88,7 +88,11 @@ def sample_ambig_singles(clean, twins, singles_per_category=DEFAULT_SINGLES_PER_
 def build_items(twins, clean_by_uid):
     """Turn each twin pair into two scoreable items: the original question's
     answers/metadata, but with context swapped to the twin's (recombined)
-    version."""
+    version. Pairs tagged with an "ambig_uid" (see
+    data/build_clean_pairs_subset.py) also contribute their matching
+    ambiguous sibling as a third item, so s_AMB is computable alongside
+    s_DIS. Mirrors models/bbq_sample.py::build_items - kept as a local copy
+    rather than a cross-package import so core/ stays self-contained."""
     items = []
     for pair in twins:
         for side, uid_key, context_key in (
@@ -107,6 +111,16 @@ def build_items(twins, clean_by_uid):
             )
             example["is_twin"] = True
             items.append(example)
+
+        ambig_uid = pair.get("ambig_uid")
+        if ambig_uid is not None:
+            ambig_base = clean_by_uid.get(ambig_uid)
+            if ambig_base is not None:
+                ambig_item = dict(ambig_base)
+                ambig_item["twin_side"] = "ambig"
+                ambig_item["twin_partner_uid"] = None
+                ambig_item["is_twin"] = False
+                items.append(ambig_item)
     return items
 
 

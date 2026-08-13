@@ -49,6 +49,15 @@ def load_results(path):
                 "thinking_chars"
             ]
 
+            # effective_answer is optional - only newer result files (post
+            # forced-answer wiring) have it. Coercing it when absent would
+            # set record["effective_answer"] = None explicitly, which
+            # defeats add_evaluation_labels' record.get("effective_answer",
+            # record.get("model_answer")) fallback for older files (the key
+            # would exist with value None instead of being absent).
+            if "effective_answer" in actual_columns:
+                integer_fields.append("effective_answer")
+
             for field in integer_fields:
                 value = row.get(field)
                 if value is not None:
@@ -107,8 +116,11 @@ def get_condition(record):
 
 
 def add_evaluation_labels(record):
-
-    prediction = record["model_answer"]
+    # effective_answer (model_answer, falling back to the probe-forced
+    # answer when the model ran out of budget before stating one) is what
+    # newer records carry; older result files predate the forced-answer
+    # wiring and only have model_answer, so fall back to it if absent.
+    prediction = record.get("effective_answer", record.get("model_answer"))
 
     unknown_index = record["unknown_index"]
     stereotype_index = record["stereotype_index"]
@@ -440,7 +452,8 @@ def save_csv(results, path):
     fieldnames = [
         "uid", "category", "subcategory", "question_index", "question_polarity",
         "context_condition", "model", "control_type", "effort", "max_tokens",
-        "prompt_control", "think", "model_answer", "correct_answer", "is_correct",
+        "prompt_control", "think", "model_answer", "effective_answer",
+        "answer_is_forced", "correct_answer", "is_correct",
         "selected_unknown", "selected_stereotype", "selected_anti_stereotype",
         "unknown_index", "stereotype_index", "anti_stereotype_index", "content",
         "thinking_chars", "latency_seconds", "probe_final_answer",

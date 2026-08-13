@@ -1,5 +1,12 @@
 import time
 from core.config.config import NATIVE_EFFORTS, BUDGETS, BUDGET_THINK_MODES, PROBE_CUTS
+# Imported as a module, not "from ... import ENABLE_FORCED_ANSWER" - that
+# would snapshot the value at import time, so an external script setting
+# core.config.config.ENABLE_FORCED_ANSWER = False before a run (see
+# models/run_smoke_sample_bigbudget.py for the equivalent pattern) wouldn't
+# be seen here. Read as core.config.config.ENABLE_FORCED_ANSWER at the
+# point of use instead, so the toggle stays live.
+import core.config.config as config
 from core.clients.olllama_client import Qwen3Response
 from core.clients.clients import get_client
 from core.utility.util import get_answer_metadata, format_prompt, parse_answer
@@ -219,6 +226,29 @@ def process_example_condition(
         result["commitment_point_frac"] = commit_frac
         result["full_chain_generated"] = full_chain
         result["probe_trajectory"] = trajectory
+
+        # Budget-capped tasks can run out of tokens mid-reasoning, leaving
+        # model_answer=None (no room left to state a digit). The probe's
+        # last cut point (100% of whatever reasoning was actually produced,
+        # complete or truncated) already forces exactly this answer via a
+        # logprob-argmax completion - reuse it instead of a new call.
+        # model_answer itself is left untouched so "the model naturally
+        # said X" and "we had to force it" stay distinguishable.
+        if config.ENABLE_FORCED_ANSWER:
+            result["answer_is_forced"] = result["model_answer"] is None
+
+            result["effective_answer"] = (
+                result["model_answer"]
+                if result["model_answer"] is not None
+                # commit_answer is a string ("0"/"1"/"2", a probe dict key) -
+                # model_answer is an int (from parse_answer). Cast so
+                # effective_answer is consistently typed regardless of
+                # source.
+                else int(commit_answer)
+            )
+        else:
+            result["answer_is_forced"] = False
+            result["effective_answer"] = result["model_answer"]
 
         return result
 

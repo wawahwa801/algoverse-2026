@@ -19,7 +19,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.config.config import MODEL
-from core.evaluation.evaluation import build_conditions, process_example_condition, normalize_dataset, load_twin_pair_dataset
+from core.evaluation.evaluation import build_conditions, process_example_condition
+from core.main import normalize_dataset, load_twin_pair_dataset
 
 TASKS_PER_LEVEL = 12
 CONCURRENCY_LEVELS = [2, 4]
