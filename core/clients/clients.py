@@ -29,8 +29,7 @@ def get_client(model_name: str):
         elif profile["backend"] == "azure":
             _thread_local.client = AzureOpenAIClient(
                 model=model_name,
-                resource_name=profile.get("resource_name"),
-                deployment_name=profile.get("deployment_name"),
+                endpoint_url=profile.get("endpoint_url"),
                 api_key=profile.get("api_key"),
             )
         else:

@@ -1,8 +1,14 @@
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import ollama
 
-from core.config.config import KEEP_ALIVE, NUM_CTX, TOP_LOGPROBS, PROBE_WORKERS
+from core.config.config import (
+    KEEP_ALIVE,
+    NUM_CTX,
+    TOP_LOGPROBS,
+    PROBE_WORKERS,
+)
 from core.evaluation.metrics import get_cut_points, find_commitment_point
 from core.clients.clients import get_model_profile, get_client
 
@@ -12,18 +18,30 @@ def generate_full_chain(
     model_name: str,
     max_tokens: int = 2048,
 ) -> str:
-    response = ollama.generate(
-        model=model_name,
-        prompt=question_prompt,
-        raw=True,
-        keep_alive=KEEP_ALIVE,
-        options={
-            "temperature": 0.7,
-            "num_predict": max_tokens,
-            "num_ctx": NUM_CTX,
-        },
+    backend = get_model_profile(model_name)["backend"]
+
+    if backend == "ollama":
+        response = ollama.generate(
+            model=model_name,
+            prompt=question_prompt,
+            raw=True,
+            keep_alive=KEEP_ALIVE,
+            options={
+                "temperature": 0.7,
+                "num_predict": max_tokens,
+                "num_ctx": NUM_CTX,
+            },
+        )
+        return response["response"]
+
+    client = get_client(model_name)
+    response = client.ask(
+        question_prompt,
+        effort="medium",
+        max_tokens=max_tokens,
     )
-    return response["response"]
+
+    return response.thinking or response.content
 
 
 def probe_cut_point(
@@ -74,7 +92,7 @@ def probe_cut_point(
     }
 
 
-def probe_cut_point_openrouter(
+def probe_cut_point_openai_compatible(
     question_prompt: str,
     partial_reasoning: str,
     model_name: str,
@@ -90,7 +108,8 @@ def probe_cut_point_openrouter(
     )
 
     logprobs = client.probe_logprobs(
-        forced_prompt, top_logprobs=TOP_LOGPROBS
+        forced_prompt,
+        top_logprobs=TOP_LOGPROBS,
     )
 
     content = (logprobs or {}).get("content") or []
@@ -121,6 +140,8 @@ def run_probe_on_item(
     max_tokens: int = 2048,
     full_chain: str = None,
 ):
+    backend = get_model_profile(model_name)["backend"]
+
     if not full_chain:
         full_chain = generate_full_chain(
             question_prompt,
@@ -134,25 +155,28 @@ def run_probe_on_item(
     )
 
     trajectory = [None] * len(cut_points)
-    backend = get_model_profile(model_name)["backend"]
 
     with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as executor:
         futures = {}
 
         for index, (frac, partial_reasoning) in enumerate(cut_points):
-            if backend == "openrouter":
-                future = executor.submit(
-                    probe_cut_point_openrouter,
-                    question_prompt,
-                    partial_reasoning,
-                    model_name,
-                )
-            else:
+            if backend == "ollama":
                 future = executor.submit(
                     probe_cut_point,
                     question_prompt,
                     partial_reasoning,
                     model_name,
+                )
+            elif backend in ("openrouter", "azure"):
+                future = executor.submit(
+                    probe_cut_point_openai_compatible,
+                    question_prompt,
+                    partial_reasoning,
+                    model_name,
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported backend for probing: {backend}"
                 )
 
             futures[future] = (index, frac)

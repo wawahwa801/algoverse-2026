@@ -7,7 +7,6 @@ OllamaThink = Union[bool, str]
 
 
 class ReasoningEffort(str, Enum):
-
     OFF = "off"
     LOW = "low"
     MEDIUM = "medium"
@@ -21,6 +20,15 @@ class ReasoningEffort(str, Enum):
         if self is ReasoningEffort.ON:
             return True
         return self.value
+
+    def to_azure_effort(self) -> str | None:
+        if self is ReasoningEffort.OFF:
+            return None
+        if self in (ReasoningEffort.HIGH, ReasoningEffort.MAX):
+            return "high"
+        if self is ReasoningEffort.LOW:
+            return "low"
+        return "medium"
 
     @classmethod
     def from_value(cls, value: Union["ReasoningEffort", str, bool, None]) -> "ReasoningEffort":

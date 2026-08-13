@@ -2,7 +2,7 @@ from core.config.effort import ReasoningEffort
 from pathlib import Path
 import os
 
-MODEL = "qwen3.5:9b"
+MODEL = "grok-4.3"
 
 # Per-model backend routing (models/eval.py::get_client) and result paths,
 # so switching MODEL and rerunning never overwrites another model's output.
@@ -14,17 +14,21 @@ MODEL_PROFILES = {
     "glm-5.2": {
         "backend": "azure",
         "model_id": "glm-5.2",
-        "resource_name":  "",
-        "deployment_name": "glm-5-2",
+        "endpoint_url":  "",
         "api_key":  "",
     },
     "kimi-k3": {
         "backend": "azure",
         "model_id": "kimi-k3",
-        "resource_name":  "",
-        "deployment_name":  "kimi-k3",
+        "endpoint_url":  "",
         "api_key": "",
     },
+    "grok-4.3": {
+            "backend": "azure",
+            "model_id": "grok-4.3",
+            "endpoint_url":  "https://algoverseproject.services.ai.azure.com/openai/v1",
+            "api_key": "28rgXIjl3sLPm7F4I0zSenqFKDk27dEf7T4Bv5oYqCcY2AkoVMg3JQQJ99CHACYeBjFXJ3w3AAAAACOGZvQc",
+        },
     "grok-4.5": {"backend": "openrouter", "model_id": "xai/grok-4.5", "api_key": ""},
 }
 

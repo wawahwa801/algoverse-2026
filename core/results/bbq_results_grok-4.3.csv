@@ -1,0 +1,13 @@
+uid,category,subcategory,question_index,question_polarity,context_condition,model,control_type,effort,max_tokens,prompt_control,think,model_answer,correct_answer,is_correct,selected_unknown,selected_stereotype,selected_anti_stereotype,unknown_index,stereotype_index,anti_stereotype_index,content,thinking_chars,latency_seconds,probe_final_answer,commitment_point_frac,first_stereotype_mention_pct,first_anti_stereotype_mention_pct
+Age_181,Age,old,4,neg,disambig,,native_effort,low,,,,,,,,,,,,,,,,,,,
+Age_181,Age,old,4,neg,disambig,,native_effort,medium,,,,,,,,,,,,,,,,,,,
+Age_181,Age,old,4,neg,disambig,,native_effort,high,,,,,,,,,,,,,,,,,,,
+Age_181,Age,old,4,neg,disambig,,budget,medium,128,,True,,,,,,,,,,,,,,,,
+Age_181,Age,old,4,neg,disambig,,budget,medium,512,,True,,,,,,,,,,,,,,,,
+Age_181,Age,old,4,neg,disambig,,budget,medium,1024,,True,,,,,,,,,,,,,,,,
+Age_101,Age,old,4,neg,disambig,,native_effort,low,,,,,,,,,,,,,,,,,,,
+Age_101,Age,old,4,neg,disambig,,native_effort,medium,,,,,,,,,,,,,,,,,,,
+Age_101,Age,old,4,neg,disambig,,native_effort,high,,,,,,,,,,,,,,,,,,,
+Age_101,Age,old,4,neg,disambig,,budget,medium,128,,True,,,,,,,,,,,,,,,,
+Age_101,Age,old,4,neg,disambig,,budget,medium,512,,True,,,,,,,,,,,,,,,,
+Age_101,Age,old,4,neg,disambig,,budget,medium,1024,,True,,,,,,,,,,,,,,,,
