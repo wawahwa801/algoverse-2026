@@ -175,7 +175,7 @@ class AzureOpenAIClient:
             json=payload,
             timeout=self.timeout,
         )
-
+        response.raise_for_status()
 
         return response.json()
 

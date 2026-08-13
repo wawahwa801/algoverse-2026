@@ -8,7 +8,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# models/ uses bare sibling imports throughout (from client import ...),
+# which only resolve when models/ itself is on sys.path - matching how
+# every script inside models/ is actually run, rather than importing it as
+# a proper models.* package (which would trigger models/__init__.py and
+# its own chain of bare imports).
+MODELS_DIR = ROOT / "models"
+if str(MODELS_DIR) not in sys.path:
+    sys.path.insert(0, str(MODELS_DIR))
+
 from core.utility.bbq_sample import load_jsonl
+from bbq_sample import build_items
 from core.config.config import (
     MODEL,
     RESULTS_JSON,
@@ -19,7 +29,8 @@ from core.config.config import (
     TASK_WORKERS,
     PROBE_CUTS,
     CHECKPOINT_INTERVAL,
-    SUBSET_DATASET_PATH,
+    PAIRS_DATASET_PATH,
+    CLEAN_DATASET_PATH,
 )
 from core.evaluation.metrics import (
     get_condition_name,
@@ -39,8 +50,13 @@ def save_checkpoint(results):
 
 
 def load_twin_pair_dataset():
-    """Load the fixed subset dataset from the checked-in BBQ subset file."""
-    return load_jsonl(SUBSET_DATASET_PATH)
+    """Load the frozen, opposite-alignment-filtered twin-pair subset (with
+    matched ambiguous siblings) - the same canonical dataset models/eval.py
+    uses, via the same build_items() so both packages never diverge."""
+    twins = load_jsonl(PAIRS_DATASET_PATH)
+    clean = load_jsonl(CLEAN_DATASET_PATH)
+    clean_by_uid = {row["uid"]: row for row in clean}
+    return build_items(twins, clean_by_uid)
 
 
 def normalize_dataset(dataset):
@@ -149,6 +165,13 @@ def main():
                 f"Resuming: {len(completed_keys)} task(s) already completed, "
                 f"{len(tasks)} remaining."
             )
+
+            # total_tasks above still reflects the full, pre-resume dataset -
+            # rebase it to what's actually left to run so the progress
+            # percentage and ETA below (which only count newly-completed
+            # tasks this run) stay meaningful instead of asymptoting below
+            # 100%.
+            total_tasks = len(tasks)
 
     start_time = time.perf_counter()
     tasks_completed = 0

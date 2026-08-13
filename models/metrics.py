@@ -28,7 +28,7 @@ def load_results(path):
             "anti_stereotype_index"
         }
 
-        actual_columns = set(reader.fieldnames or [])
+        actual_columns = set(reader.fieldnames)
 
         missing_columns = required_columns - actual_columns
 

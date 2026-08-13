@@ -49,9 +49,14 @@ BUDGET_THINK_MODES = [True]
 
 
 DATA_ROOT = PROJECT_ROOT / "data"
-PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset.jsonl"
+# The frozen, opposite-alignment-filtered subset with matched ambiguous
+# siblings (data/build_clean_pairs_subset.py) - same canonical dataset
+# models/eval.py uses, so core/ and models/ never diverge on what's "the"
+# eval set. Replaces the old unfiltered bbq_pairs_subset.jsonl and the
+# tiny hand-built core/bbq_subset.jsonl (2 rows, no alignment filter, no
+# ambig siblings).
+PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700_clean.jsonl"
 CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
-SUBSET_DATASET_PATH = PROJECT_ROOT / "core" / "bbq_subset.jsonl"
 
 MAX_EXAMPLES = 100
 TASK_WORKERS = 1

@@ -235,6 +235,7 @@ def process_example_condition(
             "question_index": example.get("question_index"),
             "question_polarity": example.get("question_polarity"),
             "context_condition": example.get("context_condition"),
+            "model": model_name,
             "control_type": condition["control_type"],
             "effort": condition["effort"],
             "max_tokens": condition["max_tokens"],
