@@ -26,7 +26,7 @@ MODEL_PROFILES = {
     "grok-4.3": {
             "backend": "azure",
             "model_id": "grok-4.3",
-            "endpoint_url":  "https://algoverseproject.services.ai.azure.com/openai/v1",
+            "endpoint_url":  "",
             "api_key": "",
         },
     "grok-4.5": {"backend": "openrouter", "model_id": "xai/grok-4.5", "api_key": ""},
