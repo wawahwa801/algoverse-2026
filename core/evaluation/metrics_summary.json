@@ -1,0 +1,38 @@
+{
+    "budget_128": {
+        "N": 15,
+        "ambiguous_accuracy": null,
+        "disambiguated_accuracy": null,
+        "s_AMB": null,
+        "s_DIS": null,
+        "pi_AMB": null,
+        "pi_DIS": null,
+        "flip_rate_overall": null,
+        "flip_rate_gap": null,
+        "avg_commitment_point": null
+    },
+    "budget_1024": {
+        "N": 15,
+        "ambiguous_accuracy": null,
+        "disambiguated_accuracy": null,
+        "s_AMB": null,
+        "s_DIS": null,
+        "pi_AMB": null,
+        "pi_DIS": null,
+        "flip_rate_overall": null,
+        "flip_rate_gap": null,
+        "avg_commitment_point": null
+    },
+    "budget_512": {
+        "N": 15,
+        "ambiguous_accuracy": null,
+        "disambiguated_accuracy": null,
+        "s_AMB": null,
+        "s_DIS": null,
+        "pi_AMB": null,
+        "pi_DIS": null,
+        "flip_rate_overall": null,
+        "flip_rate_gap": null,
+        "avg_commitment_point": null
+    }
+}

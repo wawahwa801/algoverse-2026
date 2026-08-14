@@ -136,10 +136,13 @@ def main():
                 if "error" in result:
                     continue
                 all_results.append(result)
+                
+                # Removed 'result["model"]' check here. Since Azure often returns the underlying 
+                # deployment name (e.g. gpt-4o-2024) rather than the constant dict key, checking it 
+                # strictly prevents proper test resuming.
                 completed_keys.add((
                     result["uid"],
                     get_condition_name(result),
-                    result["model"],
                 ))
 
             tasks = [
@@ -148,7 +151,6 @@ def main():
                 if (
                     example["uid"],
                     get_condition_name(condition),
-                    MODEL,
                 ) not in completed_keys
             ]
 

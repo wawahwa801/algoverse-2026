@@ -1,4 +1,5 @@
 import time
+
 from core.config.config import (
     NATIVE_EFFORTS,
     BUDGETS,
@@ -6,12 +7,6 @@ from core.config.config import (
     PROMPT_CONTROLS,
     PROBE_CUTS,
 )
-# Imported as a module, not "from ... import ENABLE_FORCED_ANSWER" - that
-# would snapshot the value at import time, so an external script setting
-# core.config.config.ENABLE_FORCED_ANSWER = False before a run (see
-# models/run_smoke_sample_bigbudget.py for the equivalent pattern) wouldn't
-# be seen here. Read as core.config.config.ENABLE_FORCED_ANSWER at the
-# point of use instead, so the toggle stays live.
 import core.config.config as config
 from core.clients.olllama_client import Qwen3Response
 from core.clients.clients import get_client
@@ -23,32 +18,28 @@ from core.evaluation.metrics import (
 )
 from core.evaluation.probes import run_probe_on_item
 
+# --- Flip Rate Configurations ---
+ENABLE_FLIP_RATE_EVAL = False 
+FLIP_RATE_K = 3                
+
 
 def get_full_chain_max_tokens(condition: dict) -> int:
     control_type = condition["control_type"]
-
     if control_type == "native_effort":
         effort = condition.get("effort")
-        if effort == "low":
-            return 256
-        if effort == "medium":
-            return 512
-        if effort == "high":
-            return 1024
+        if effort == "low": return 256
+        if effort == "medium": return 512
+        if effort == "high": return 1024
         return 512
 
     if control_type == "budget":
         max_tokens = condition.get("max_tokens")
-        if max_tokens is None:
-            return 512
-        return max_tokens
+        return 512 if max_tokens is None else max_tokens
 
     if control_type == "prompt":
         prompt_control = condition.get("prompt_control")
-        if prompt_control == "answer_immediately":
-            return 256
-        if prompt_control == "think_thoroughly":
-            return 1024
+        if prompt_control == "answer_immediately": return 256
+        if prompt_control == "think_thoroughly": return 1024
         return 512
 
     return 512
@@ -56,7 +47,6 @@ def get_full_chain_max_tokens(condition: dict) -> int:
 
 def build_conditions() -> list:
     conditions = []
-
     for effort in NATIVE_EFFORTS:
         conditions.append({
             "control_type": "native_effort",
@@ -96,21 +86,25 @@ def evaluate_example(
     max_tokens: int = None,
     prompt_control: str = None,
     think: bool = None,
+    prefix: str = None,
 ) -> dict:
     prompt = format_prompt(example, prompt_control=prompt_control)
     metadata = get_answer_metadata(example)
     valid_indices = [int(index) for index in example["answers"].keys()]
-
+    
     request_effort = effort
     if request_effort is None:
         request_effort = "medium" if think is True else "off"
 
     start_time = time.perf_counter()
 
+    # Pass the prefix downstream to the client to pre-fill the reasoning sequence
+    # (Client wrapper should appropriately inject this for Thought Anchor continuations)
     response: Qwen3Response = client.ask(
         prompt,
         effort=request_effort,
         max_tokens=max_tokens,
+        prefix=prefix
     )
 
     elapsed = time.perf_counter() - start_time
@@ -170,7 +164,6 @@ def process_example_condition(
     model_name: str,
 ) -> dict:
     client = get_client(model_name)
-
     condition_name = get_condition_name({
         "control_type": condition["control_type"],
         "effort": condition["effort"],
@@ -192,35 +185,22 @@ def process_example_condition(
 
         thinking_text = result.get("thinking") or ""
 
-        stereotype_terms = keyword_terms(
-            example, result["stereotype_index"]
-        )
-        anti_stereotype_terms = keyword_terms(
-            example, result["anti_stereotype_index"]
-        )
-        stereotype_mentions = find_mentions(
-            thinking_text, stereotype_terms
-        )
-        anti_stereotype_mentions = find_mentions(
-            thinking_text, anti_stereotype_terms
-        )
+        stereotype_terms = keyword_terms(example, result["stereotype_index"])
+        anti_stereotype_terms = keyword_terms(example, result["anti_stereotype_index"])
+        
+        stereotype_mentions = find_mentions(thinking_text, stereotype_terms)
+        anti_stereotype_mentions = find_mentions(thinking_text, anti_stereotype_terms)
 
         result["stereotype_mentions"] = stereotype_mentions
         result["anti_stereotype_mentions"] = anti_stereotype_mentions
         result["first_stereotype_mention_pct"] = (
-            stereotype_mentions[0]["pct_through_reasoning"]
-            if stereotype_mentions else None
+            stereotype_mentions[0]["pct_through_reasoning"] if stereotype_mentions else None
         )
         result["first_anti_stereotype_mention_pct"] = (
-            anti_stereotype_mentions[0]["pct_through_reasoning"]
-            if anti_stereotype_mentions else None
+            anti_stereotype_mentions[0]["pct_through_reasoning"] if anti_stereotype_mentions else None
         )
 
-        probe_prompt = format_prompt(
-            example,
-            prompt_control=condition["prompt_control"],
-        )
-
+        probe_prompt = format_prompt(example, prompt_control=condition["prompt_control"])
         probing_max_tokens = get_full_chain_max_tokens(condition)
 
         (
@@ -236,43 +216,58 @@ def process_example_condition(
         )
 
         commit_frac, commit_answer = commitment_point
-
+        
         result["probe_final_answer"] = commit_answer
         result["commitment_point_frac"] = commit_frac
         result["full_chain_generated"] = full_chain
         result["probe_trajectory"] = trajectory
 
-        # Budget-capped tasks can run out of tokens mid-reasoning, leaving
-        # model_answer=None (no room left to state a digit). The probe's
-        # last cut point (100% of whatever reasoning was actually produced,
-        # complete or truncated) already forces exactly this answer via a
-        # logprob-argmax completion - reuse it instead of a new call.
-        # model_answer itself is left untouched so "the model naturally
-        # said X" and "we had to force it" stay distinguishable.
         if config.ENABLE_FORCED_ANSWER:
             result["answer_is_forced"] = result["model_answer"] is None
-
             result["effective_answer"] = (
                 result["model_answer"]
                 if result["model_answer"] is not None
-                # commit_answer is a string ("0"/"1"/"2", a probe dict key) -
-                # model_answer is an int (from parse_answer). Cast so
-                # effective_answer is consistently typed regardless of
-                # source.
-                else int(commit_answer)
+                else int(commit_answer) if commit_answer else None
             )
         else:
             result["answer_is_forced"] = False
             result["effective_answer"] = result["model_answer"]
 
+        # --- Flip Rate (Commitment Robustness) Evaluation ---
+        # Resamples from the extracted commitment prefix to test answer rigidity
+        result["flip_rate"] = None
+        if ENABLE_FLIP_RATE_EVAL and full_chain and result["effective_answer"] is not None:
+            prefix_length = int(len(full_chain) * commit_frac)
+            reasoning_prefix = full_chain[:prefix_length]
+            
+            flips = 0
+            for _ in range(FLIP_RATE_K):
+                # Request a continuation using the sliced thought anchor
+                resample = evaluate_example(
+                    client=client,
+                    example=example,
+                    control_type=condition["control_type"],
+                    effort=condition["effort"],
+                    max_tokens=condition["max_tokens"],
+                    prompt_control=condition["prompt_control"],
+                    think=condition["think"],
+                    prefix=reasoning_prefix  # Continuation prefix
+                )
+                
+                resampled_answer = (
+                    resample["model_answer"] if not config.ENABLE_FORCED_ANSWER
+                    else (resample["model_answer"] if resample["model_answer"] is not None else None)
+                )
+                
+                if resampled_answer is not None and resampled_answer != result["effective_answer"]:
+                    flips += 1
+                    
+            result["flip_rate"] = flips / FLIP_RATE_K
+
         return result
 
     except Exception as e:
-        print(
-            f"ERROR processing UID={example['uid']} "
-            f"with condition {condition_name}: {e}"
-        )
-
+        print(f"ERROR processing UID={example['uid']} with condition {condition_name}: {e}")
         return {
             "uid": example["uid"],
             "category": example.get("category"),
@@ -287,4 +282,5 @@ def process_example_condition(
             "prompt_control": condition["prompt_control"],
             "think": condition["think"],
             "error": str(e),
+            "flip_rate": None,
         }

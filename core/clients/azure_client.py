@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence, Union
 
@@ -70,6 +71,7 @@ class AzureOpenAIClient:
         effort: EffortInput = ReasoningEffort.MEDIUM,
         system: str | None = None,
         max_tokens: int | None = None,
+        prefix: str | None = None,
         **kwargs: Any,
     ) -> AzureResponse:
 
@@ -85,6 +87,15 @@ class AzureOpenAIClient:
             "role": "user",
             "content": prompt,
         })
+
+        # Azure/OpenAI chat completions don't strictly support prefixing a continuation natively 
+        # in the same way open-weight models do, but appending it as an assistant message is 
+        # the standard workaround to ensure the model carries the context forward.
+        if prefix:
+            messages.append({
+                "role": "assistant",
+                "content": prefix,
+            })
 
         resolved_effort = ReasoningEffort.from_value(effort)
 
@@ -142,6 +153,11 @@ class AzureOpenAIClient:
             for m in ["o1", "o3"]
         )
 
+        # Reasoning models currently do not support logprobs
+        if is_openai_reasoning_model:
+            request.pop("logprobs", None)
+            request.pop("top_logprobs", None)
+
         if max_tokens is not None:
             if is_openai_reasoning_model:
                 request["max_completion_tokens"] = max_tokens
@@ -161,23 +177,31 @@ class AzureOpenAIClient:
         return request
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
-
         headers = {
             "api-key": self.api_key,
             "Content-Type": "application/json",
         }
 
         url = f"{self.endpoint_url}/chat/completions"
+        max_retries = 5
 
-        response = httpx.post(
-            url,
-            headers=headers,
-            json=payload,
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-
-        return response.json()
+        # Implemented exponential backoff to handle ThreadPoolExecutor 429 Rate Limits
+        for attempt in range(max_retries):
+            response = httpx.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=self.timeout,
+            )
+            
+            if response.status_code in (429, 502, 503, 504):
+                time.sleep(2 ** attempt)
+                continue
+                
+            response.raise_for_status()
+            return response.json()
+            
+        raise RuntimeError(f"Azure API Request failed after {max_retries} attempts.")
 
     def _to_response(
         self,
@@ -199,5 +223,22 @@ class AzureOpenAIClient:
             raw=payload,
         )
 
-    def probe_logprobs(self, prompt, *, top_logprobs=4):
-        return {"content": []}
+    def probe_logprobs(self, prompt: str, *, top_logprobs: int = 4) -> dict[str, Any]:
+        messages = [{"role": "user", "content": prompt}]
+        
+        payload = self._build_request(
+            messages,
+            effort=ReasoningEffort.LOW,
+            max_tokens=1,  # We only need the immediate next token logic for probing
+            logprobs=True,
+            top_logprobs=top_logprobs,
+        )
+        
+        try:
+            response_data = self._post(payload)
+            choice = response_data.get("choices", [{}])[0]
+            logprobs = choice.get("logprobs") or {}
+            
+            return {"content": logprobs.get("content", [])}
+        except Exception as e:
+            return {"content": []}

@@ -2,7 +2,7 @@ from core.config.effort import ReasoningEffort
 from pathlib import Path
 import os
 
-MODEL = "qwen3:4b"
+MODEL = "kimi-k2.6"
 
 # Per-model backend routing (models/eval.py::get_client) and result paths,
 # so switching MODEL and rerunning never overwrites another model's output.
@@ -12,17 +12,11 @@ MODEL_PROFILES = {
     "qwen3:4b": {"backend": "ollama", "model_id": "qwen3:4b"},
     "qwen3.5:9b": {"backend": "ollama", "model_id": "qwen3.5:9b"},
     "gpt-oss:20b": {"backend": "ollama", "model_id": "gpt-oss:20b"},
-    "glm-5.2": {
+    "kimi-k2.6": {
         "backend": "azure",
-        "model_id": "glm-5.2",
-        "endpoint_url":  "",
-        "api_key":  "",
-    },
-    "kimi-k3": {
-        "backend": "azure",
-        "model_id": "kimi-k3",
-        "endpoint_url":  "",
-        "api_key": "",
+        "model_id": "kimi-k2.6",
+        "endpoint_url":  "https://algoverseproject.services.ai.azure.com/openai/v1",
+        "api_key": "28rgXIjl3sLPm7F4I0zSenqFKDk27dEf7T4Bv5oYqCcY2AkoVMg3JQQJ99CHACYeBjFXJ3w3AAAAACOGZvQc",
     },
     "deepseek-v4-pro": {
             "backend": "azure",
@@ -48,7 +42,7 @@ BUDGETS = [128, 512, 1024]
 # Available prompt-control variants (models/config.py). Empty by default so
 # the main sweep stays budget/native-effort only; set to e.g.
 # PROMPT_CONTROL_OPTIONS to re-enable prompt conditions in build_conditions().
-PROMPT_CONTROL_OPTIONS = ["answer_immediately", "think_thoroughly"]
+PROMPT_CONTROL_OPTIONS = []
 PROMPT_CONTROLS = []
 BUDGET_THINK_MODES = [True]
 
@@ -60,12 +54,13 @@ DATA_ROOT = PROJECT_ROOT / "data"
 # eval set. Replaces the old unfiltered bbq_pairs_subset.jsonl and the
 # tiny hand-built core/bbq_subset.jsonl (2 rows, no alignment filter, no
 # ambig siblings).
+
 PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700.jsonl"
 CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
 # Legacy hand-sampled subset path (models/config.py::DATASET_PATH).
 DATASET_PATH = PROJECT_ROOT / "core" / "bbq_subset.jsonl"
 
-MAX_EXAMPLES = 100
+MAX_EXAMPLES = 20
 TASK_WORKERS = 1
 PROBE_WORKERS = 2
 PROBE_CUTS = 4
