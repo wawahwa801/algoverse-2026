@@ -16,7 +16,7 @@ MODEL_PROFILES = {
         "backend": "azure",
         "model_id": "kimi-k2.6",
         "endpoint_url":  "https://algoverseproject.services.ai.azure.com/openai/v1",
-        "api_key": "28rgXIjl3sLPm7F4I0zSenqFKDk27dEf7T4Bv5oYqCcY2AkoVMg3JQQJ99CHACYeBjFXJ3w3AAAAACOGZvQc",
+        "api_key": "",
     },
     "deepseek-v4-pro": {
             "backend": "azure",
@@ -60,13 +60,13 @@ CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
 # Legacy hand-sampled subset path (models/config.py::DATASET_PATH).
 DATASET_PATH = PROJECT_ROOT / "core" / "bbq_subset.jsonl"
 
-MAX_EXAMPLES = 20
-TASK_WORKERS = 1
+MAX_EXAMPLES = 100
+TASK_WORKERS = 2
 PROBE_WORKERS = 2
 PROBE_CUTS = 4
 TOP_LOGPROBS = 4
 KEEP_ALIVE = "24h"
-CHECKPOINT_INTERVAL = 50
+CHECKPOINT_INTERVAL = 100
 # When True (default), budget-condition tasks that run out of tokens before
 # stating an answer get effective_answer filled in from the probe's forced
 # completion. Set False for runs that need to measure true natural
