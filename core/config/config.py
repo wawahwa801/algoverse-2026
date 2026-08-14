@@ -24,13 +24,12 @@ MODEL_PROFILES = {
         "endpoint_url":  "",
         "api_key": "",
     },
-    "grok-4.3": {
+    "deepseek-v4-pro": {
             "backend": "azure",
-            "model_id": "grok-4.3",
+            "model_id": "deepseek-v4-pro",
             "endpoint_url":  "",
             "api_key": "",
         },
-    "grok-4.5": {"backend": "openrouter", "model_id": "xai/grok-4.5", "api_key": ""},
 
 }
 

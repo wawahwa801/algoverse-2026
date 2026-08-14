@@ -1,6 +1,5 @@
 import threading
 from core.clients.olllama_client import Qwen3Client
-from core.clients.openrouter_client import OpenRouterModelClient
 from core.clients.azure_client import AzureOpenAIClient
 from core.config.config import MODEL_PROFILES
 
@@ -22,11 +21,8 @@ def get_client(model_name: str):
     if not hasattr(_thread_local, "client"):
         profile = get_model_profile(model_name)
 
-        if profile["backend"] == "openrouter":
-            _thread_local.client = OpenRouterModelClient(
-                model_id=profile["model_id"]
-            )
-        elif profile["backend"] == "azure":
+
+        if profile["backend"] == "azure":
             _thread_local.client = AzureOpenAIClient(
                 model=model_name,
                 endpoint_url=profile.get("endpoint_url"),
