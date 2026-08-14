@@ -2,7 +2,7 @@ import csv
 import json
 import re
 from collections import defaultdict
-
+from pathlib import Path
 
 def load_results(path):
     records = []
@@ -78,7 +78,8 @@ def load_results(path):
                 "selected_unknown",
                 "selected_stereotype",
                 "selected_anti_stereotype",
-                "think"
+                "think",
+                "is_twin"
             ]
             for field in boolean_fields:
                 value = row.get(field)
@@ -396,7 +397,8 @@ def save_csv(results, path):
         "unknown_index", "stereotype_index", "anti_stereotype_index", "content",
         "thinking_chars", "latency_seconds", "probe_final_answer",
         "commitment_point_frac", "first_stereotype_mention_pct",
-        "first_anti_stereotype_mention_pct", "flip_rate"
+        "first_anti_stereotype_mention_pct", "flip_rate",
+        "evidence_alignment", "is_twin", "twin_partner_uid", "twin_side" 
     ]
 
     with open(path, "w", newline="", encoding="utf-8") as file:
@@ -404,8 +406,59 @@ def save_csv(results, path):
         writer.writeheader()
         for result in results:
             writer.writerow({field: result.get(field) for field in fieldnames})
+def summarize_counterfactuals(records):
+    """
+    Evaluates disparities in accuracy, commitment fraction, and keyword mentions 
+    between stereotype-aligned and counter-stereotype twins.
+    """
+    groups = group_by_condition(records)
+    
+    print("\n" + "=" * 115)
+    print("COUNTERFACTUAL PAIR ANALYSIS (Disambiguated Contexts Only)")
+    print("=" * 115)
+    
+    # Header
+    print(
+        "{:<25} | {:<20} | {:<20} | {:<35}".format(
+            "Condition", 
+            "Accuracy (St / Anti)", 
+            "Commit Frac (St / Anti)", 
+            "1st Mention Pct (St-kw / Anti-kw)"
+        )
+    )
+    print("-" * 115)
 
+    for condition in sorted(groups.keys()):
+        rows = [r for r in groups[condition] if r.get("context_condition") == "disambig"]
+        
+        stereo_rows = [r for r in rows if r.get("evidence_alignment") == "stereotype_aligned"]
+        counter_rows = [r for r in rows if r.get("evidence_alignment") == "counter_stereotype"]
 
+        # Accuracies
+        st_acc = sum(1 for r in stereo_rows if r.get("is_correct")) / len(stereo_rows) if stereo_rows else None
+        ct_acc = sum(1 for r in counter_rows if r.get("is_correct")) / len(counter_rows) if counter_rows else None
+
+        # Commitment Points (Average)
+        st_commit = sum(r.get("commitment_point_frac") or 0 for r in stereo_rows) / len(stereo_rows) if stereo_rows else None
+        ct_commit = sum(r.get("commitment_point_frac") or 0 for r in counter_rows) / len(counter_rows) if counter_rows else None
+        
+        # Keyword Mentions (Average % through reasoning where target group is mentioned)
+        # Using first_stereotype_mention_pct as an indicator
+        st_mention = sum(r.get("first_stereotype_mention_pct") or 0 for r in stereo_rows if r.get("first_stereotype_mention_pct")) / len(stereo_rows) if stereo_rows else None
+        ct_mention = sum(r.get("first_anti_stereotype_mention_pct") or 0 for r in counter_rows if r.get("first_anti_stereotype_mention_pct")) / len(counter_rows) if counter_rows else None
+
+        acc_str = f"{format_percent(st_acc)} / {format_percent(ct_acc)}"
+        commit_str = f"{format_percent(st_commit)} / {format_percent(ct_commit)}"
+        mention_str = f"{format_percent(st_mention)} / {format_percent(ct_mention)}"
+
+        print(
+            "{:<25} | {:<20} | {:<20} | {:<35}".format(
+                condition,
+                acc_str,
+                commit_str,
+                mention_str
+            )
+        )
 def get_condition_name(result):
     control_type = result.get("control_type")
 
@@ -454,7 +507,7 @@ def print_summary(results):
 
 
 def main():
-    records = load_results("results/bbq_results.csv")
+    records = load_results(Path(__file__).resolve().parent.parent/"results"/"bbq_results_kimi-k2.6.csv")
     unique_uids = {record["uid"] for record in records}
 
     print("Loaded rows:", len(records))
@@ -462,7 +515,7 @@ def main():
 
     check_saved_labels(records)
     summarize(records)
-
+    summarize_counterfactuals(records)
 
 if __name__ == "__main__":
     main()

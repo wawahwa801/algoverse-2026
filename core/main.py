@@ -1,6 +1,7 @@
 import json
 import sys
 import time
+import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -72,13 +73,29 @@ def normalize_dataset(dataset):
 
 
 def main():
+    # Set up argument parsing
+    parser = argparse.ArgumentParser(description="Run model evaluation on dataset.")
+    parser.add_argument(
+        "--jsonl", 
+        type=str, 
+        default=None, 
+        help="Optional: Path to a single JSONL file to load instead of the default twin-pair dataset."
+    )
+    args = parser.parse_args()
+
     test_effort_conversion()
     test_ollama_conversion()
 
     print("good conversion\n")
-    print("Loading BBQ twin-pair dataset...")
-
-    dataset = load_twin_pair_dataset()
+    
+    # Conditionally load based on arguments
+    if args.jsonl:
+        print(f"Loading custom JSONL dataset from {args.jsonl}...")
+        dataset = load_jsonl(args.jsonl)
+    else:
+        print("Loading BBQ twin-pair dataset...")
+        dataset = load_twin_pair_dataset()
+        
     dataset = normalize_dataset(dataset)
 
     original_count = len(dataset)
@@ -91,7 +108,7 @@ def main():
 
     if dataset and not isinstance(dataset[0], dict):
         raise TypeError(
-            "load_twin_pair_dataset() did not return BBQ dictionaries "
+            "Dataset did not return dictionaries "
             f"after normalization. First item type: {type(dataset[0])}"
         )
 
@@ -188,13 +205,15 @@ def main():
                 result = future.result()
                 all_results.append(result)
             except Exception as e:
-                print(f"Worker error for UID={example['uid']}: {e}")
+                print(f"Worker error for UID={example.get('uid', 'unknown')}: {e}")
 
             elapsed = time.perf_counter() - start_time
             average_time = elapsed / tasks_completed
             remaining = total_tasks - tasks_completed
             eta = average_time * remaining
-            progress = (tasks_completed / total_tasks) * 100
+            
+            # Avoid division by zero if total_tasks is somehow 0
+            progress = (tasks_completed / total_tasks * 100) if total_tasks > 0 else 100
 
             print(
                 f"Progress: {tasks_completed}/{total_tasks} "

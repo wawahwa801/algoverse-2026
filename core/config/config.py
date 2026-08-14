@@ -38,7 +38,7 @@ RESULTS_JSON = RESULTS_DIR / f"bbq_results_{_model_slug(MODEL)}.json"
 RESULTS_CSV = RESULTS_DIR / f"bbq_results_{_model_slug(MODEL)}.csv"
 
 NATIVE_EFFORTS = ["low", "medium", "high"]
-BUDGETS = [128, 512, 1024]
+BUDGETS = [512, 1024, 2048]
 # Available prompt-control variants (models/config.py). Empty by default so
 # the main sweep stays budget/native-effort only; set to e.g.
 # PROMPT_CONTROL_OPTIONS to re-enable prompt conditions in build_conditions().

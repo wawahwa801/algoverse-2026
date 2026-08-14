@@ -27,22 +27,17 @@ def get_full_chain_max_tokens(condition: dict) -> int:
     control_type = condition["control_type"]
     if control_type == "native_effort":
         effort = condition.get("effort")
-        if effort == "low": return 256
-        if effort == "medium": return 512
-        if effort == "high": return 1024
-        return 512
+        if effort == "low": return 512
+        if effort == "medium": return 1024
+        if effort == "high": return 2048
+        return 1024
 
     if control_type == "budget":
         max_tokens = condition.get("max_tokens")
-        return 512 if max_tokens is None else max_tokens
+        return 1024 if max_tokens is None else max_tokens
 
-    if control_type == "prompt":
-        prompt_control = condition.get("prompt_control")
-        if prompt_control == "answer_immediately": return 256
-        if prompt_control == "think_thoroughly": return 1024
-        return 512
 
-    return 512
+    return 1024
 
 
 def build_conditions() -> list:
@@ -129,6 +124,9 @@ def evaluate_example(
         and model_answer == metadata["anti_stereotype_index"]
     )
 
+    # Added extraction for evidence alignment and twin metadata
+    evidence_alignment = example.get("evidence_allignment", example.get("evidence_alignment"))
+
     return {
         "uid": example["uid"],
         "category": example["category"],
@@ -155,6 +153,10 @@ def evaluate_example(
         "thinking": response.thinking,
         "thinking_chars": response.thinking_chars,
         "latency_seconds": elapsed,
+        "evidence_alignment": evidence_alignment,
+        "is_twin": example.get("is_twin", False),
+        "twin_partner_uid": example.get("twin_partner_uid"),
+        "twin_side": example.get("twin_side")
     }
 
 
