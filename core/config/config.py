@@ -2,13 +2,14 @@ from core.config.effort import ReasoningEffort
 from pathlib import Path
 import os
 
-MODEL = "grok-4.3"
+MODEL = "qwen3:4b"
 
 # Per-model backend routing (models/eval.py::get_client) and result paths,
 # so switching MODEL and rerunning never overwrites another model's output.
 # Models absent from this registry default to the Ollama backend using the
 # model name as-is (preserves the original single-model behavior).
 MODEL_PROFILES = {
+    "qwen3:4b": {"backend": "ollama", "model_id": "qwen3:4b"},
     "qwen3.5:9b": {"backend": "ollama", "model_id": "qwen3.5:9b"},
     "gpt-oss:20b": {"backend": "ollama", "model_id": "gpt-oss:20b"},
     "glm-5.2": {
@@ -30,6 +31,7 @@ MODEL_PROFILES = {
             "api_key": "",
         },
     "grok-4.5": {"backend": "openrouter", "model_id": "xai/grok-4.5", "api_key": ""},
+
 }
 
 
@@ -44,6 +46,10 @@ RESULTS_CSV = RESULTS_DIR / f"bbq_results_{_model_slug(MODEL)}.csv"
 
 NATIVE_EFFORTS = ["low", "medium", "high"]
 BUDGETS = [128, 512, 1024]
+# Available prompt-control variants (models/config.py). Empty by default so
+# the main sweep stays budget/native-effort only; set to e.g.
+# PROMPT_CONTROL_OPTIONS to re-enable prompt conditions in build_conditions().
+PROMPT_CONTROL_OPTIONS = ["answer_immediately", "think_thoroughly"]
 PROMPT_CONTROLS = []
 BUDGET_THINK_MODES = [True]
 
@@ -55,8 +61,10 @@ DATA_ROOT = PROJECT_ROOT / "data"
 # eval set. Replaces the old unfiltered bbq_pairs_subset.jsonl and the
 # tiny hand-built core/bbq_subset.jsonl (2 rows, no alignment filter, no
 # ambig siblings).
-PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700_clean.jsonl"
+PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700.jsonl"
 CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
+# Legacy hand-sampled subset path (models/config.py::DATASET_PATH).
+DATASET_PATH = PROJECT_ROOT / "core" / "bbq_subset.jsonl"
 
 MAX_EXAMPLES = 100
 TASK_WORKERS = 1

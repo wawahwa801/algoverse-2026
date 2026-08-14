@@ -1,5 +1,11 @@
 import time
-from core.config.config import NATIVE_EFFORTS, BUDGETS, BUDGET_THINK_MODES, PROBE_CUTS
+from core.config.config import (
+    NATIVE_EFFORTS,
+    BUDGETS,
+    BUDGET_THINK_MODES,
+    PROMPT_CONTROLS,
+    PROBE_CUTS,
+)
 # Imported as a module, not "from ... import ENABLE_FORCED_ANSWER" - that
 # would snapshot the value at import time, so an external script setting
 # core.config.config.ENABLE_FORCED_ANSWER = False before a run (see
@@ -69,6 +75,15 @@ def build_conditions() -> list:
                 "prompt_control": None,
                 "think": think,
             })
+
+    for prompt_control in PROMPT_CONTROLS:
+        conditions.append({
+            "control_type": "prompt",
+            "effort": None,
+            "max_tokens": None,
+            "prompt_control": prompt_control,
+            "think": None,
+        })
 
     return conditions
 

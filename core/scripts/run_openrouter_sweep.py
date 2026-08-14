@@ -1,21 +1,27 @@
-"""Run the reasoning-budget sweep against the 3 hosted open-weight models
-(GLM 5.2, Kimi K3, DeepSeek V4 Pro) via OpenRouter.
+"""Run the reasoning-budget sweep against hosted open-weight models via OpenRouter.
 
 Requires OPENROUTER_API_KEY to be set in the environment. Writes results
-incrementally to results/openrouter_sweep.jsonl and skips any (uid, model,
-condition) triple already present there, so an interrupted run can resume
-without re-paying for completed calls.
+incrementally to core/results/openrouter_sweep.jsonl and skips any
+(uid, model, condition) triple already present there, so an interrupted run
+can resume without re-paying for completed calls.
 """
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
-from bbq_sample import load_sample
-from openrouter_client import OpenRouterClient
-from eval import format_prompt, get_answer_metadata, parse_answer, build_conditions, get_condition_name
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-RESULTS_PATH = Path(__file__).resolve().parent / "results" / "openrouter_sweep.jsonl"
+from core.utility.bbq_sample import load_sample, SWEEP_PAIRS_PER_CATEGORY
+from core.clients.openrouter_client import OpenRouterClient
+from core.utility.util import format_prompt, get_answer_metadata, parse_answer
+from core.evaluation.evaluation import build_conditions
+from core.evaluation.metrics import get_condition_name
+
+RESULTS_PATH = Path(__file__).resolve().parents[1] / "results" / "openrouter_sweep.jsonl"
 
 MODELS = {
     "glm-5.2": "z-ai/glm-5.2",
@@ -127,7 +133,9 @@ async def run_all(items, conditions):
 
 
 def main():
-    sampled_twins, items = load_sample()
+    sampled_twins, _sampled_singles, items = load_sample(
+        pairs_per_category=SWEEP_PAIRS_PER_CATEGORY,
+    )
     categories = sorted({row["category"] for row in sampled_twins})
     print(f"Sampled {len(sampled_twins)} twin pairs across {len(categories)} categories")
     print(f"Built {len(items)} items")

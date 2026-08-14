@@ -1,17 +1,22 @@
 import json
+import sys
 import time
 from pathlib import Path
 
-from client import Qwen3Client
-from util import load_bbq, format_prompt, get_answer_metadata, parse_answer
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.clients.olllama_client import Qwen3Client
+from core.config.config import DATASET_PATH, PROJECT_ROOT
+from core.utility.util import load_bbq, format_prompt, get_answer_metadata, parse_answer
 
 # Qwen3Client only talks to Ollama's chat API and never touches anything
 # Qwen3-specific; gpt-oss exposes the same "think": low/medium/high field,
 # so the client is reused here as-is rather than duplicated.
 MODEL = "gpt-oss:20b"
 
-DATASET_PATH = Path("bbq_subset.jsonl")
-RESULTS_PATH = Path("results/gptoss_effort_results.json")
+RESULTS_PATH = PROJECT_ROOT / "core" / "results" / "gptoss_effort_results.json"
 
 EFFORTS = ["low", "medium", "high"]
 

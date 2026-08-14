@@ -18,6 +18,9 @@ OUTPUT_PATH = Path(__file__).resolve().parents[1] / "bbq_subset.jsonl"
 
 DEFAULT_PAIRS_PER_CATEGORY = 1
 DEFAULT_SINGLES_PER_CATEGORY = 1
+# Stratified sweep size used by models/bbq_sample.py and the OpenRouter/Qwen
+# local sweep scripts (core/scripts/run_*_sweep.py).
+SWEEP_PAIRS_PER_CATEGORY = 200
 DEFAULT_SEED = 0
 
 

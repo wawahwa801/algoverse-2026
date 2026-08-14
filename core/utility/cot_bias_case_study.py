@@ -18,7 +18,7 @@ SEED = 0
 # feedback_points_pratham.md, Mentor 1) while guaranteeing every example
 # pair actually tests commitment asymmetry, and picks up each pair's
 # ambiguous sibling for free via bbq_sample.build_items.
-RESULTS_PATH = Path(__file__).resolve().parent / "results" / "cot_bias_case_study.jsonl"
+RESULTS_PATH = Path(__file__).resolve().parents[1] / "results" / "cot_bias_case_study.jsonl"
 
 
 def sample_pairs(twins, n, seed):

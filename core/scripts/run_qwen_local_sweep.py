@@ -1,35 +1,33 @@
 """Run the same reasoning-budget sweep as run_openrouter_sweep.py, but
-against qwen3.5:9b via Ollama - either locally or on a remote GPU (e.g. a
-Lightning AI T4 instance) reachable over HTTP. Same sample
-(bbq_sample.load_sample), same 8 conditions, same result schema (minus
-model_id/twin fields staying uid-based) so runs can be concatenated for
-analysis.
-
-Concurrency is bounded by CONCURRENCY, which should match (or stay under)
-the server's OLLAMA_NUM_PARALLEL setting - requesting more concurrent
-generations than the server can actually run in parallel just queues them
-there instead of here, with no speed benefit.
+against qwen3.5:9b via Ollama - either locally or on a remote GPU reachable
+over HTTP. Same sample (bbq_sample.load_sample), same conditions, same result
+schema so runs can be concatenated for analysis.
 
 Point at a remote GPU by setting OLLAMA_HOST, e.g.:
-    OLLAMA_HOST=http://<lightning-ai-instance>:11434 py run_qwen_local_sweep.py
+    OLLAMA_HOST=http://<lightning-ai-instance>:11434 python core/scripts/run_qwen_local_sweep.py
 """
 
 import json
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 
-from bbq_sample import load_sample
-from client import Qwen3Client
-from eval import format_prompt, get_answer_metadata, parse_answer, build_conditions, get_condition_name
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.utility.bbq_sample import load_sample, SWEEP_PAIRS_PER_CATEGORY
+from core.clients.olllama_client import Qwen3Client
+from core.utility.util import format_prompt, get_answer_metadata, parse_answer
+from core.evaluation.evaluation import build_conditions
+from core.evaluation.metrics import get_condition_name
 
 MODEL = "qwen3.5:9b"
-RESULTS_PATH = Path(__file__).resolve().parent / "results" / "qwen_local_sweep.jsonl"
+RESULTS_PATH = Path(__file__).resolve().parents[1] / "results" / "qwen_local_sweep.jsonl"
 
-# Match this to the server's OLLAMA_NUM_PARALLEL. Requesting more than the
-# server can actually run concurrently just queues extra requests there.
 CONCURRENCY = int(os.environ.get("QWEN_SWEEP_CONCURRENCY", "2"))
 
 
@@ -105,7 +103,10 @@ def run_all(client, items, conditions):
         return build_result(example, condition, response, model_answer, metadata, elapsed)
 
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
-        futures = {pool.submit(run_one, example, condition): (example, condition) for example, condition in jobs}
+        futures = {
+            pool.submit(run_one, example, condition): (example, condition)
+            for example, condition in jobs
+        }
 
         for i, future in enumerate(as_completed(futures), start=1):
             example, condition = futures[future]
@@ -130,7 +131,9 @@ def run_all(client, items, conditions):
 
 
 def main():
-    sampled_twins, items = load_sample()
+    sampled_twins, _sampled_singles, items = load_sample(
+        pairs_per_category=SWEEP_PAIRS_PER_CATEGORY,
+    )
     categories = sorted({row["category"] for row in sampled_twins})
     print(f"Sampled {len(sampled_twins)} twin pairs across {len(categories)} categories")
     print(f"Built {len(items)} items")
