@@ -8,6 +8,9 @@ MODEL = "kimi-k2.6"
 # so switching MODEL and rerunning never overwrites another model's output.
 # Models absent from this registry default to the Ollama backend using the
 # model name as-is (preserves the original single-model behavior).
+# NOTE: api_key values are intentionally blank - a real key was found
+# committed in the algoverse-2026 clone this was merged from (rotate that
+# key). Set via environment / local-only config, never commit a real one.
 MODEL_PROFILES = {
     "qwen3:4b": {"backend": "ollama", "model_id": "qwen3:4b"},
     "qwen3.5:9b": {"backend": "ollama", "model_id": "qwen3.5:9b"},
@@ -15,16 +18,22 @@ MODEL_PROFILES = {
     "kimi-k2.6": {
         "backend": "azure",
         "model_id": "kimi-k2.6",
+<<<<<<< Updated upstream
         "endpoint_url":  "https://algoverseproject.services.ai.azure.com/openai/v1",
+=======
+        "endpoint_url": "",
+>>>>>>> Stashed changes
         "api_key": "",
     },
     "deepseek-v4-pro": {
-            "backend": "azure",
-            "model_id": "deepseek-v4-pro",
-            "endpoint_url":  "",
-            "api_key": "",
-        },
-
+        "backend": "azure",
+        "model_id": "deepseek-v4-pro",
+        "endpoint_url": "",
+        "api_key": "",
+    },
+    # Kept available even though not in the active roster - OpenRouterModelClient
+    # still exists and works, costs nothing to leave wired in.
+    "grok-4.5": {"backend": "openrouter", "model_id": "xai/grok-4.5", "api_key": ""},
 }
 
 
@@ -38,10 +47,10 @@ RESULTS_JSON = RESULTS_DIR / f"bbq_results_{_model_slug(MODEL)}.json"
 RESULTS_CSV = RESULTS_DIR / f"bbq_results_{_model_slug(MODEL)}.csv"
 
 NATIVE_EFFORTS = ["low", "medium", "high"]
-BUDGETS = [512, 1024, 2048]
-# Available prompt-control variants (models/config.py). Empty by default so
-# the main sweep stays budget/native-effort only; set to e.g.
-# PROMPT_CONTROL_OPTIONS to re-enable prompt conditions in build_conditions().
+BUDGETS = [2048, 4096, 8192]
+# Empty by default so the main sweep stays budget/native-effort only; set to
+# e.g. ["answer_immediately", "think_thoroughly"] to re-enable prompt
+# conditions in build_conditions().
 PROMPT_CONTROL_OPTIONS = []
 PROMPT_CONTROLS = []
 BUDGET_THINK_MODES = [True]
@@ -54,10 +63,11 @@ DATA_ROOT = PROJECT_ROOT / "data"
 # eval set. Replaces the old unfiltered bbq_pairs_subset.jsonl and the
 # tiny hand-built core/bbq_subset.jsonl (2 rows, no alignment filter, no
 # ambig siblings).
-
-PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700.jsonl"
+PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700_clean.jsonl"
 CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
-# Legacy hand-sampled subset path (models/config.py::DATASET_PATH).
+# Legacy hand-sampled subset path (models/config.py::DATASET_PATH) - not
+# used by the main twin-pair flow, kept for scripts/tools that still
+# reference a flat single-file dataset.
 DATASET_PATH = PROJECT_ROOT / "core" / "bbq_subset.jsonl"
 
 MAX_EXAMPLES = 100

@@ -17,11 +17,15 @@ TWINS_PATH = ROOT / "data" / "bbq_twins.jsonl"
 OUTPUT_PATH = Path(__file__).resolve().parents[1] / "bbq_subset.jsonl"
 
 DEFAULT_PAIRS_PER_CATEGORY = 1
+<<<<<<< Updated upstream
 DEFAULT_SINGLES_PER_CATEGORY = 2
+=======
+DEFAULT_SINGLES_PER_CATEGORY = 1
+DEFAULT_SEED = 0
+>>>>>>> Stashed changes
 # Stratified sweep size used by models/bbq_sample.py and the OpenRouter/Qwen
 # local sweep scripts (core/scripts/run_*_sweep.py).
 SWEEP_PAIRS_PER_CATEGORY = 200
-DEFAULT_SEED = 0
 
 
 def load_jsonl(path):
