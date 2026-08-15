@@ -74,7 +74,7 @@ def probe_cut_point(
     logprobs = response.get("logprobs", [])
 
     if not logprobs:
-        return {option: 0.0 for option in answer_options}
+        return None
 
     top_logprobs = logprobs[0].get("top_logprobs", [])
     raw_probs = {}
@@ -115,7 +115,7 @@ def probe_cut_point_openai_compatible(
     content = (logprobs or {}).get("content") or []
 
     if not content:
-        return {option: 0.0 for option in answer_options}
+        return None
 
     top_logprobs = content[0].get("top_logprobs", [])
     raw_probs = {}
