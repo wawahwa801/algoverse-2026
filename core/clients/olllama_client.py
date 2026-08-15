@@ -150,13 +150,18 @@ class Qwen3Client:
         *,
         stream: bool,
         max_tokens: int | None = None,
+        prefix: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         think: OllamaThink = effort.to_ollama_think()
 
+        message_list = list(messages)
+        if prefix:
+            message_list.append({"role": "assistant", "content": prefix})
+
         request = {
             "model": self.model_id,
-            "messages": list(messages),
+            "messages": message_list,
             "think": think,
             "stream": stream,
             **kwargs,
