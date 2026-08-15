@@ -27,7 +27,7 @@ class AzureResponse:
         return len(self.thinking or "")
 
 
-class AzureOpenAIClient:
+class AzureClient:
     def __init__(
         self,
         endpoint_url: str | None = None,
@@ -64,6 +64,29 @@ class AzureOpenAIClient:
                 "via AZURE_API_KEY."
             )
 
+    def _model_family(self) -> str:
+        name = self.model.lower().replace("_", "-")
+
+        if "kimi-k2.6" in name or "kimi-k2-6" in name:
+            return "kimi_k2.6"
+
+        if any(token in name for token in ("o1", "o3")):
+            return "openai_reasoning"
+
+        return "generic"
+
+    @staticmethod
+    def _effort_value(effort: EffortInput) -> str:
+        if isinstance(effort, ReasoningEffort):
+            value = getattr(effort, "value", effort)
+        elif effort is None:
+            value = "off"
+        elif isinstance(effort, bool):
+            value = "medium" if effort else "off"
+        else:
+            value = effort
+        return str(value).lower()
+
     def ask(
         self,
         prompt: str,
@@ -88,14 +111,26 @@ class AzureOpenAIClient:
             "content": prompt,
         })
 
-
         if prefix:
-            messages.append({
-                "role": "assistant",
-                "content": prefix,
-            })
+            if self._model_family() == "kimi_k2.6":
+                # Kimi K2.6 supports preserved thinking through the
+                # assistant reasoning_content field. Keep the actual
+                # reasoning prefix separate from normal assistant content.
+                messages.append({
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": prefix,
+                })
+            else:
+                messages.append({
+                    "role": "assistant",
+                    "content": prefix,
+                })
 
-        resolved_effort = ReasoningEffort.from_value(effort)
+        if self._model_family() == "kimi_k2.6":
+            resolved_effort = ReasoningEffort.from_value("medium")
+        else:
+            resolved_effort = ReasoningEffort.from_value(effort)
 
         return self.chat(
             messages,
@@ -113,11 +148,16 @@ class AzureOpenAIClient:
         **kwargs: Any,
     ) -> AzureResponse:
 
-        resolved_effort = ReasoningEffort.from_value(effort)
+        # Kimi K2.6 has a binary native thinking control rather than
+        # OpenAI-style low/medium/high reasoning_effort.
+        if self._model_family() == "kimi_k2.6":
+            resolved_effort = ReasoningEffort.from_value("medium")
+        else:
+            resolved_effort = ReasoningEffort.from_value(effort)
 
         payload = self._build_request(
             messages,
-            resolved_effort,
+            effort,
             max_tokens=max_tokens,
             **kwargs,
         )
@@ -132,11 +172,15 @@ class AzureOpenAIClient:
     def _build_request(
         self,
         messages: Messages,
-        effort: ReasoningEffort,
+        effort: EffortInput,
         *,
         max_tokens: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+
+        # Clean kwargs to prevent passing internal control flags to Azure
+        kwargs.pop("think", None)
+        kwargs.pop("prompt_control", None)
 
         request: dict[str, Any] = {
             "model": self.model,
@@ -144,33 +188,27 @@ class AzureOpenAIClient:
             **kwargs,
         }
 
-        # For Chat Completions, use max_completion_tokens
-        # for reasoning models such as o1/o3.
-        is_openai_reasoning_model = any(
-            m in self.model.lower()
-            for m in ["o1", "o3"]
+        model_family = self._model_family()
+        is_openai_reasoning = model_family == "openai_reasoning" or any(
+            k in self.model.lower() for k in ("o1", "o3")
         )
 
-        # Reasoning models currently do not support logprobs
-        if is_openai_reasoning_model:
+        if is_openai_reasoning:
             request.pop("logprobs", None)
             request.pop("top_logprobs", None)
-
-        if max_tokens is not None:
-            if is_openai_reasoning_model:
+            if max_tokens is not None:
                 request["max_completion_tokens"] = max_tokens
-            else:
-                request["max_tokens"] = max_tokens
-
-        if is_openai_reasoning_model:
+            
             azure_effort = (
                 effort.to_azure_effort()
-                if hasattr(effort, "to_azure_effort")
-                else None
+                if isinstance(effort, ReasoningEffort) and hasattr(effort, "to_azure_effort")
+                else self._effort_value(effort)
             )
-
-            if azure_effort:
+            if azure_effort in {"low", "medium", "high"}:
                 request["reasoning_effort"] = azure_effort
+        else:
+            if max_tokens is not None:
+                request["max_tokens"] = max_tokens
 
         return request
 
@@ -183,7 +221,6 @@ class AzureOpenAIClient:
         url = f"{self.endpoint_url}/chat/completions"
         max_retries = 5
 
-        # Implemented exponential backoff to handle ThreadPoolExecutor 429 Rate Limits
         for attempt in range(max_retries):
             response = httpx.post(
                 url,
@@ -191,14 +228,14 @@ class AzureOpenAIClient:
                 json=payload,
                 timeout=self.timeout,
             )
-            
+
             if response.status_code in (429, 502, 503, 504):
                 time.sleep(2 ** attempt)
                 continue
-                
+
             response.raise_for_status()
             return response.json()
-            
+
         raise RuntimeError(f"Azure API Request failed after {max_retries} attempts.")
 
     def _to_response(
@@ -223,20 +260,30 @@ class AzureOpenAIClient:
 
     def probe_logprobs(self, prompt: str, *, top_logprobs: int = 4) -> dict[str, Any]:
         messages = [{"role": "user", "content": prompt}]
-        
+
+        build_kwargs: dict[str, Any] = {
+            "logprobs": True,
+            "top_logprobs": top_logprobs,
+        }
+
+        # Commitment probing needs the answer-token distribution immediately;
+        # do not let Kimi spend the one-token probe call generating another
+        # reasoning step first.
+        if self._model_family() == "kimi_k2.6":
+            build_kwargs["thinking"] = {"type": "disabled"}
+
         payload = self._build_request(
             messages,
             effort=ReasoningEffort.LOW,
-            max_tokens=1,  # We only need the immediate next token logic for probing
-            logprobs=True,
-            top_logprobs=top_logprobs,
+            max_tokens=1,
+            **build_kwargs,
         )
-        
+
         try:
             response_data = self._post(payload)
             choice = response_data.get("choices", [{}])[0]
             logprobs = choice.get("logprobs") or {}
-            
+
             return {"content": logprobs.get("content", [])}
-        except Exception as e:
+        except Exception:
             return {"content": []}

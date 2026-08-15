@@ -1,7 +1,7 @@
 import threading
 from core.clients.olllama_client import Qwen3Client
 from core.clients.openrouter_client import OpenRouterModelClient
-from core.clients.azure_client import AzureOpenAIClient
+from core.clients.azure_client import AzureClient
 from core.config.config import MODEL_PROFILES
 
 _thread_local = threading.local()
@@ -27,7 +27,7 @@ def get_client(model_name: str):
                 model_id=profile["model_id"]
             )
         elif profile["backend"] == "azure":
-            _thread_local.client = AzureOpenAIClient(
+            _thread_local.client = AzureClient(
                 model=model_name,
                 endpoint_url=profile.get("endpoint_url"),
                 api_key=profile.get("api_key"),

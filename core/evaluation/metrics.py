@@ -22,7 +22,7 @@ def load_results(path):
             "correct_answer",
             "unknown_index",
             "stereotype_index",
-            "anti_stereotype_index"
+            "anti_stereotype_index",
         }
 
         actual_columns = set(reader.fieldnames or [])
@@ -544,6 +544,8 @@ def get_condition_name(result):
 
     if control_type == "prompt":
         return "prompt_" + str(result["prompt_control"])
+    if control_type == "toggle":
+            return "toggle_think_" + str(result["think"])
 
     return "unknown"
 

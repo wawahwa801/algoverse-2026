@@ -29,7 +29,12 @@ from core.evaluation.metrics import (
     save_json,
     save_csv,
 )
-from core.evaluation.evaluation import build_conditions, process_example_condition
+from core.evaluation.evaluation import (
+    build_conditions,
+    process_example_condition,
+    ENABLE_FLIP_RATE_EVAL,
+    FLIP_RATE_K,
+)
 
 
 def save_checkpoint(results):
@@ -72,14 +77,17 @@ def normalize_dataset(dataset):
     return dataset
 
 
+def _same_model(a: str | None, b: str | None) -> bool:
+    return bool(a and b and a.strip().lower() == b.strip().lower())
+
+
 def main():
-    # Set up argument parsing
     parser = argparse.ArgumentParser(description="Run model evaluation on dataset.")
     parser.add_argument(
-        "--jsonl", 
-        type=str, 
-        default=None, 
-        help="Optional: Path to a single JSONL file to load instead of the default twin-pair dataset."
+        "--jsonl",
+        type=str,
+        default=None,
+        help="Optional: Path to a single JSONL file to load instead of the default twin-pair dataset.",
     )
     args = parser.parse_args()
 
@@ -87,15 +95,14 @@ def main():
     test_ollama_conversion()
 
     print("good conversion\n")
-    
-    # Conditionally load based on arguments
+
     if args.jsonl:
         print(f"Loading custom JSONL dataset from {args.jsonl}...")
         dataset = load_jsonl(args.jsonl)
     else:
         print("Loading BBQ twin-pair dataset...")
         dataset = load_twin_pair_dataset()
-        
+
     dataset = normalize_dataset(dataset)
 
     original_count = len(dataset)
@@ -122,10 +129,12 @@ def main():
     print(f"Ambiguous examples: {ambiguous_count}")
     print(f"Disambiguated examples: {disambiguated_count}")
 
-    conditions = build_conditions()
+    # Kimi K2.6 has a binary native thinking control (on/off), while models
+    # such as Qwen can keep the configured low/medium/high native controls.
+    conditions = build_conditions(model_name=MODEL)
 
     total_tasks = len(dataset) * len(conditions)
-    calls_per_task = 1 + PROBE_CUTS
+    calls_per_task = 1 + PROBE_CUTS + (FLIP_RATE_K if ENABLE_FLIP_RATE_EVAL else 0)
     estimated_calls = total_tasks * calls_per_task
 
     print(f"\nConditions: {len(conditions)}")
@@ -146,19 +155,27 @@ def main():
                 existing_results = json.load(f)
         except json.JSONDecodeError:
             existing_results = []
-            print(f"Warning: existing results file {RESULTS_JSON} was unreadable; starting fresh.")
+            print(
+                f"Warning: existing results file {RESULTS_JSON} was unreadable; "
+                "starting fresh."
+            )
 
         if isinstance(existing_results, list):
             for result in existing_results:
                 if "error" in result:
                     continue
+
+                # New results carry experiment_model. For older files, fall
+                # back to the stored model field; mismatched-model records are
+                # not loaded into the current run and therefore cannot pollute
+                # another model's resume state.
+                result_model = result.get("experiment_model", result.get("model"))
+                if not _same_model(result_model, MODEL):
+                    continue
+
                 all_results.append(result)
-                
-                # Removed 'result["model"]' check here. Since Azure often returns the underlying 
-                # deployment name (e.g. gpt-4o-2024) rather than the constant dict key, checking it 
-                # strictly prevents proper test resuming.
                 completed_keys.add((
-                    result["uid"],
+                    str(result["uid"]),
                     get_condition_name(result),
                 ))
 
@@ -166,7 +183,7 @@ def main():
                 (example, condition)
                 for example, condition in tasks
                 if (
-                    example["uid"],
+                    str(example["uid"]),
                     get_condition_name(condition),
                 ) not in completed_keys
             ]
@@ -176,11 +193,6 @@ def main():
                 f"{len(tasks)} remaining."
             )
 
-            # total_tasks above still reflects the full, pre-resume dataset -
-            # rebase it to what's actually left to run so the progress
-            # percentage and ETA below (which only count newly-completed
-            # tasks this run) stay meaningful instead of asymptoting below
-            # 100%.
             total_tasks = len(tasks)
 
     start_time = time.perf_counter()
@@ -211,8 +223,7 @@ def main():
             average_time = elapsed / tasks_completed
             remaining = total_tasks - tasks_completed
             eta = average_time * remaining
-            
-            # Avoid division by zero if total_tasks is somehow 0
+
             progress = (tasks_completed / total_tasks * 100) if total_tasks > 0 else 100
 
             print(

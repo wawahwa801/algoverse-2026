@@ -4,13 +4,6 @@ import os
 
 MODEL = "kimi-k2.6"
 
-# Per-model backend routing (models/eval.py::get_client) and result paths,
-# so switching MODEL and rerunning never overwrites another model's output.
-# Models absent from this registry default to the Ollama backend using the
-# model name as-is (preserves the original single-model behavior).
-# NOTE: api_key values are intentionally blank - a real key was found
-# committed in the algoverse-2026 clone this was merged from (rotate that
-# key). Set via environment / local-only config, never commit a real one.
 MODEL_PROFILES = {
     "qwen3:4b": {"backend": "ollama", "model_id": "qwen3:4b"},
     "qwen3.5:9b": {"backend": "ollama", "model_id": "qwen3.5:9b"},
@@ -18,8 +11,8 @@ MODEL_PROFILES = {
     "kimi-k2.6": {
         "backend": "azure",
         "model_id": "kimi-k2.6",
-        "endpoint_url": "",
-        "api_key": "",
+        "endpoint_url": "https://algoverseproject.services.ai.azure.com/openai/v1",
+        "api_key": "28rgXIjl3sLPm7F4I0zSenqFKDk27dEf7T4Bv5oYqCcY2AkoVMg3JQQJ99CHACYeBjFXJ3w3AAAAACOGZvQc",
     },
     "deepseek-v4-pro": {
         "backend": "azure",
@@ -27,8 +20,7 @@ MODEL_PROFILES = {
         "endpoint_url": "",
         "api_key": "",
     },
-    # Kept available even though not in the active roster - OpenRouterModelClient
-    # still exists and works, costs nothing to leave wired in.
+
     "grok-4.5": {"backend": "openrouter", "model_id": "xai/grok-4.5", "api_key": ""},
 }
 
@@ -43,7 +35,8 @@ RESULTS_JSON = RESULTS_DIR / f"bbq_results_{_model_slug(MODEL)}.json"
 RESULTS_CSV = RESULTS_DIR / f"bbq_results_{_model_slug(MODEL)}.csv"
 
 NATIVE_EFFORTS = ["low", "medium", "high"]
-BUDGETS = [2048, 4096, 8192]
+AZURE_NATIVE_EFFORTS = [True, False]
+BUDGETS = [512, 2048, 8192]
 # Empty by default so the main sweep stays budget/native-effort only; set to
 # e.g. ["answer_immediately", "think_thoroughly"] to re-enable prompt
 # conditions in build_conditions().
@@ -53,12 +46,7 @@ BUDGET_THINK_MODES = [True]
 
 
 DATA_ROOT = PROJECT_ROOT / "data"
-# The frozen, opposite-alignment-filtered subset with matched ambiguous
-# siblings (data/build_clean_pairs_subset.py) - same canonical dataset
-# models/eval.py uses, so core/ and models/ never diverge on what's "the"
-# eval set. Replaces the old unfiltered bbq_pairs_subset.jsonl and the
-# tiny hand-built core/bbq_subset.jsonl (2 rows, no alignment filter, no
-# ambig siblings).
+
 PAIRS_DATASET_PATH = DATA_ROOT / "bbq_pairs_subset_700_clean.jsonl"
 CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
 # Legacy hand-sampled subset path (models/config.py::DATASET_PATH) - not
@@ -73,11 +61,8 @@ PROBE_CUTS = 4
 TOP_LOGPROBS = 4
 KEEP_ALIVE = "24h"
 CHECKPOINT_INTERVAL = 100
-# When True (default), budget-condition tasks that run out of tokens before
-# stating an answer get effective_answer filled in from the probe's forced
-# completion. Set False for runs that need to measure true natural
-# completion rate itself (e.g. a large-budget test) - forcing an answer
-# there would mask exactly the "does the model finish on its own" signal.
+ENABLE_FLIP_RATE_EVAL = False
+FLIP_RATE_K = 3
 ENABLE_FORCED_ANSWER = True
 # Ollama defaults num_ctx to 4096; probe_cut_point concatenates the question
 # prompt with the full partial reasoning trace, which can exceed that on
