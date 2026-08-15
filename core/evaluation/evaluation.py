@@ -7,6 +7,12 @@ from core.config.config import (
     PROMPT_CONTROLS,
     PROBE_CUTS,
 )
+# Imported as a module, not "from ... import ENABLE_FORCED_ANSWER" - that
+# would snapshot the value at import time, so an external script setting
+# core.config.config.ENABLE_FORCED_ANSWER = False before a run (see
+# models/run_smoke_sample_bigbudget.py for the equivalent pattern) wouldn't
+# be seen here. Read as config.ENABLE_FORCED_ANSWER at the point of use
+# instead, so the toggle stays live.
 import core.config.config as config
 from core.clients.olllama_client import Qwen3Response
 from core.clients.clients import get_client
@@ -19,23 +25,28 @@ from core.evaluation.metrics import (
 from core.evaluation.probes import run_probe_on_item
 
 # --- Flip Rate Configurations ---
-ENABLE_FLIP_RATE_EVAL = False 
-FLIP_RATE_K = 3                
+# Off by default - K resamples per (item, budget) is a real multiplier on
+# calls/time (see conversation with the team re: cost). Enable deliberately,
+# ideally on a subset rather than the full dataset.
+ENABLE_FLIP_RATE_EVAL = False
+FLIP_RATE_K = 3
 
 
 def get_full_chain_max_tokens(condition: dict) -> int:
     control_type = condition["control_type"]
     if control_type == "native_effort":
         effort = condition.get("effort")
-        if effort == "low": return 512
-        if effort == "medium": return 1024
-        if effort == "high": return 2048
+        if effort == "low":
+            return 512
+        if effort == "medium":
+            return 1024
+        if effort == "high":
+            return 2048
         return 1024
 
     if control_type == "budget":
         max_tokens = condition.get("max_tokens")
         return 1024 if max_tokens is None else max_tokens
-
 
     return 1024
 
@@ -61,6 +72,9 @@ def build_conditions() -> list:
                 "think": think,
             })
 
+    # Empty by default (config.PROMPT_CONTROLS) - the main sweep stays
+    # budget/native-effort only per the team's decision to drop prompt-based
+    # conditions.
     for prompt_control in PROMPT_CONTROLS:
         conditions.append({
             "control_type": "prompt",
@@ -86,20 +100,22 @@ def evaluate_example(
     prompt = format_prompt(example, prompt_control=prompt_control)
     metadata = get_answer_metadata(example)
     valid_indices = [int(index) for index in example["answers"].keys()]
-    
+
     request_effort = effort
     if request_effort is None:
         request_effort = "medium" if think is True else "off"
 
     start_time = time.perf_counter()
 
-    # Pass the prefix downstream to the client to pre-fill the reasoning sequence
-    # (Client wrapper should appropriately inject this for Thought Anchor continuations)
+    # prefix (used by flip-rate resampling below) pre-fills the reasoning
+    # sequence with a truncated prior trace, so the client continues from
+    # that point rather than starting fresh - see each client's ask()
+    # for how it's injected (Azure: appended as an assistant message).
     response: Qwen3Response = client.ask(
         prompt,
         effort=request_effort,
         max_tokens=max_tokens,
-        prefix=prefix
+        prefix=prefix,
     )
 
     elapsed = time.perf_counter() - start_time
@@ -124,7 +140,6 @@ def evaluate_example(
         and model_answer == metadata["anti_stereotype_index"]
     )
 
-    # Added extraction for evidence alignment and twin metadata
     evidence_alignment = example.get("evidence_allignment", example.get("evidence_alignment"))
 
     return {
@@ -156,7 +171,7 @@ def evaluate_example(
         "evidence_alignment": evidence_alignment,
         "is_twin": example.get("is_twin", False),
         "twin_partner_uid": example.get("twin_partner_uid"),
-        "twin_side": example.get("twin_side")
+        "twin_side": example.get("twin_side"),
     }
 
 
@@ -189,7 +204,7 @@ def process_example_condition(
 
         stereotype_terms = keyword_terms(example, result["stereotype_index"])
         anti_stereotype_terms = keyword_terms(example, result["anti_stereotype_index"])
-        
+
         stereotype_mentions = find_mentions(thinking_text, stereotype_terms)
         anti_stereotype_mentions = find_mentions(thinking_text, anti_stereotype_terms)
 
@@ -220,7 +235,7 @@ def process_example_condition(
         )
 
         commit_frac, commit_answer = commitment_point
-        
+
         result["probe_final_answer"] = commit_answer
         result["commitment_point_frac"] = commit_frac
         result["commitment_depth_chars"] = (
@@ -231,11 +246,22 @@ def process_example_condition(
         result["full_chain_generated"] = full_chain
         result["probe_trajectory"] = trajectory
 
+        # Budget-capped tasks can run out of tokens mid-reasoning, leaving
+        # model_answer=None (no room left to state a digit). The probe's
+        # last cut point (100% of whatever reasoning was actually produced,
+        # complete or truncated) already forces exactly this answer via a
+        # logprob-argmax completion - reuse it instead of a new call.
+        # model_answer itself is left untouched so "the model naturally
+        # said X" and "we had to force it" stay distinguishable.
         if config.ENABLE_FORCED_ANSWER:
             result["answer_is_forced"] = result["model_answer"] is None
             result["effective_answer"] = (
                 result["model_answer"]
                 if result["model_answer"] is not None
+                # commit_answer is a string ("0"/"1"/"2", a probe dict key) -
+                # model_answer is an int (from parse_answer). Cast so
+                # effective_answer is consistently typed regardless of
+                # source; guard against a falsy/missing commit_answer too.
                 else int(commit_answer) if commit_answer else None
             )
         else:
@@ -243,8 +269,7 @@ def process_example_condition(
             result["effective_answer"] = result["model_answer"]
 
         # --- Flip Rate (Commitment Robustness) Evaluation ---
-        # Resample K continuations from the exact commitment prefix.
-        # Invalid/unparseable continuations are excluded from the denominator.
+        # Resamples from the extracted commitment prefix to test answer rigidity
         result["flip_rate"] = None
         result["flip_flips"] = 0
         result["flip_valid_resamples"] = 0
@@ -259,7 +284,8 @@ def process_example_condition(
         ):
             prefix_length = int(len(full_chain) * commit_frac)
             reasoning_prefix = full_chain[:prefix_length]
-
+            
+            flips = 0
             for _ in range(FLIP_RATE_K):
                 resample = evaluate_example(
                     client=client,
@@ -271,22 +297,16 @@ def process_example_condition(
                     think=condition["think"],
                     prefix=reasoning_prefix,
                 )
-
-                resampled_answer = resample.get("model_answer")
-
-                # For robustness, do not count a failed parse as a flip.
-                if resampled_answer is None:
-                    result["flip_invalid_resamples"] += 1
-                    continue
-
-                result["flip_valid_resamples"] += 1
-                if resampled_answer != result["effective_answer"]:
-                    result["flip_flips"] += 1
-
-            if result["flip_valid_resamples"] > 0:
-                result["flip_rate"] = (
-                    result["flip_flips"] / result["flip_valid_resamples"]
+                
+                resampled_answer = (
+                    resample["model_answer"] if not config.ENABLE_FORCED_ANSWER
+                    else (resample["model_answer"] if resample["model_answer"] is not None else None)
                 )
+                
+                if resampled_answer is not None and resampled_answer != result["effective_answer"]:
+                    flips += 1
+                    
+            result["flip_rate"] = flips / FLIP_RATE_K
 
         return result
 
