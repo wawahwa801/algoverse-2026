@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CLEAN_PATH = ROOT / "data" / "bbq_clean.jsonl"
-TWINS_PATH = ROOT / "data" / "bbq_twins.jsonl"
+TWINS_PATH = ROOT / "data" / "bbq_twins_fixed.jsonl"
 OUTPUT_PATH = Path(__file__).resolve().parents[1] / "bbq_subset.jsonl"
 
 DEFAULT_PAIRS_PER_CATEGORY = 1
