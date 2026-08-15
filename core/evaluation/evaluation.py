@@ -201,6 +201,8 @@ def process_example_condition(
         result["first_anti_stereotype_mention_pct"] = (
             anti_stereotype_mentions[0]["pct_through_reasoning"] if anti_stereotype_mentions else None
         )
+        result["stereotype_mention_count"] = len(stereotype_mentions)
+        result["anti_stereotype_mention_count"] = len(anti_stereotype_mentions)
 
         probe_prompt = format_prompt(example, prompt_control=condition["prompt_control"])
         probing_max_tokens = get_full_chain_max_tokens(condition)
@@ -221,6 +223,11 @@ def process_example_condition(
         
         result["probe_final_answer"] = commit_answer
         result["commitment_point_frac"] = commit_frac
+        result["commitment_depth_chars"] = (
+            int(len(full_chain) * commit_frac)
+            if full_chain and commit_frac is not None
+            else None
+        )
         result["full_chain_generated"] = full_chain
         result["probe_trajectory"] = trajectory
 
@@ -236,15 +243,24 @@ def process_example_condition(
             result["effective_answer"] = result["model_answer"]
 
         # --- Flip Rate (Commitment Robustness) Evaluation ---
-        # Resamples from the extracted commitment prefix to test answer rigidity
+        # Resample K continuations from the exact commitment prefix.
+        # Invalid/unparseable continuations are excluded from the denominator.
         result["flip_rate"] = None
-        if ENABLE_FLIP_RATE_EVAL and full_chain and result["effective_answer"] is not None:
+        result["flip_flips"] = 0
+        result["flip_valid_resamples"] = 0
+        result["flip_invalid_resamples"] = 0
+        result["flip_k"] = FLIP_RATE_K if ENABLE_FLIP_RATE_EVAL else 0
+
+        if (
+            ENABLE_FLIP_RATE_EVAL
+            and full_chain
+            and commit_frac is not None
+            and result.get("effective_answer") is not None
+        ):
             prefix_length = int(len(full_chain) * commit_frac)
             reasoning_prefix = full_chain[:prefix_length]
-            
-            flips = 0
+
             for _ in range(FLIP_RATE_K):
-                # Request a continuation using the sliced thought anchor
                 resample = evaluate_example(
                     client=client,
                     example=example,
@@ -253,18 +269,24 @@ def process_example_condition(
                     max_tokens=condition["max_tokens"],
                     prompt_control=condition["prompt_control"],
                     think=condition["think"],
-                    prefix=reasoning_prefix  # Continuation prefix
+                    prefix=reasoning_prefix,
                 )
-                
-                resampled_answer = (
-                    resample["model_answer"] if not config.ENABLE_FORCED_ANSWER
-                    else (resample["model_answer"] if resample["model_answer"] is not None else None)
+
+                resampled_answer = resample.get("model_answer")
+
+                # For robustness, do not count a failed parse as a flip.
+                if resampled_answer is None:
+                    result["flip_invalid_resamples"] += 1
+                    continue
+
+                result["flip_valid_resamples"] += 1
+                if resampled_answer != result["effective_answer"]:
+                    result["flip_flips"] += 1
+
+            if result["flip_valid_resamples"] > 0:
+                result["flip_rate"] = (
+                    result["flip_flips"] / result["flip_valid_resamples"]
                 )
-                
-                if resampled_answer is not None and resampled_answer != result["effective_answer"]:
-                    flips += 1
-                    
-            result["flip_rate"] = flips / FLIP_RATE_K
 
         return result
 

@@ -88,9 +88,7 @@ class AzureOpenAIClient:
             "content": prompt,
         })
 
-        # Azure/OpenAI chat completions don't strictly support prefixing a continuation natively 
-        # in the same way open-weight models do, but appending it as an assistant message is 
-        # the standard workaround to ensure the model carries the context forward.
+
         if prefix:
             messages.append({
                 "role": "assistant",
