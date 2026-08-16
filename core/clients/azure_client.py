@@ -244,8 +244,13 @@ class AzureClient:
         effort: ReasoningEffort,
     ) -> AzureResponse:
 
-        choice = payload.get("choices", [{}])[0]
-        message = choice.get("message", {})
+        # Safe extraction without assuming valid choices exist
+        choices = payload.get("choices") or []
+        choice = choices[0] if choices else {}
+        if not choice:
+            choice = {}
+            
+        message = choice.get("message") or {}
 
         return AzureResponse(
             content=message.get("content") or "",
@@ -266,11 +271,10 @@ class AzureClient:
             "top_logprobs": top_logprobs,
         }
 
-        # Commitment probing needs the answer-token distribution immediately;
-        # do not let Kimi spend the one-token probe call generating another
-        # reasoning step first.
-        if self._model_family() == "kimi_k2.6":
-            build_kwargs["thinking"] = {"type": "disabled"}
+        # NOTE: this Azure deployment rejects `thinking` as an unrecognized
+        # argument (400 unrecognized_request_argument), so it can't be used
+        # to suppress Kimi's reasoning before the forced-answer token.
+
 
         payload = self._build_request(
             messages,
@@ -281,9 +285,19 @@ class AzureClient:
 
         try:
             response_data = self._post(payload)
-            choice = response_data.get("choices", [{}])[0]
+            
+            # Safe extraction avoiding NoneType errors
+            choices = response_data.get("choices") or []
+            choice = choices[0] if choices else {}
+            if not choice:
+                choice = {}
+                
             logprobs = choice.get("logprobs") or {}
 
-            return {"content": logprobs.get("content", [])}
-        except Exception:
+            return {"content": logprobs.get("content") or []}
+        except httpx.HTTPStatusError as e:
+            print("HTTP", e.response.status_code, "-", e.response.text[:500])
+            return {"content": []}
+        except Exception as e:
+            print(repr(e))
             return {"content": []}

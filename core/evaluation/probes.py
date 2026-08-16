@@ -71,18 +71,22 @@ def probe_cut_point(
         top_logprobs=TOP_LOGPROBS,
     )
 
-    logprobs = response.get("logprobs", [])
+    # Hardened extraction layer
+    logprobs = response.get("logprobs") or []
 
     if not logprobs:
         return None
 
-    top_logprobs = logprobs[0].get("top_logprobs", [])
+    first_item = logprobs[0] or {}
+    top_logprobs = first_item.get("top_logprobs") or []
     raw_probs = {}
 
     for entry in top_logprobs:
-        token_str = entry.get("token", "").strip()
+        if not entry:
+            continue
+        token_str = (entry.get("token") or "").strip()
         if token_str in answer_options:
-            raw_probs[token_str] = math.exp(entry["logprob"])
+            raw_probs[token_str] = math.exp(entry.get("logprob", -99.0))
 
     total = sum(raw_probs.values()) or 1e-9
 
@@ -117,13 +121,17 @@ def probe_cut_point_openai_compatible(
     if not content:
         return None
 
-    top_logprobs = content[0].get("top_logprobs", [])
+    # Hardened extraction layer
+    first_item = content[0] or {}
+    top_logprobs = first_item.get("top_logprobs") or []
     raw_probs = {}
 
     for entry in top_logprobs:
+        if not entry:
+            continue
         token_str = (entry.get("token") or "").strip()
         if token_str in answer_options:
-            raw_probs[token_str] = math.exp(entry["logprob"])
+            raw_probs[token_str] = math.exp(entry.get("logprob", -99.0))
 
     total = sum(raw_probs.values()) or 1e-9
 
