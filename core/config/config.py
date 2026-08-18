@@ -54,14 +54,14 @@ CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
 # reference a flat single-file dataset.
 DATASET_PATH = PROJECT_ROOT / "core" / "bbq_subset.jsonl"
 
-MAX_EXAMPLES = 100
-TASK_WORKERS = 3
+MAX_EXAMPLES = 2
+TASK_WORKERS = 2
 PROBE_WORKERS = 2
 PROBE_CUTS = 5
 TOP_LOGPROBS = 5
 KEEP_ALIVE = "24h"
 CHECKPOINT_INTERVAL = 100
-ENABLE_FLIP_RATE_EVAL = False
+ENABLE_FLIP_RATE_EVAL = True
 FLIP_RATE_K = 3
 ENABLE_FORCED_ANSWER = True
 # Ollama defaults num_ctx to 4096; probe_cut_point concatenates the question

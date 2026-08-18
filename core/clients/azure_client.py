@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import random
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence, Union
 
@@ -12,6 +15,33 @@ from core.config.effort import ReasoningEffort
 Message = Mapping[str, Any]
 Messages = Sequence[Message]
 EffortInput = Union[ReasoningEffort, str, bool, None]
+
+
+class _RateLimiter:
+    """Sliding-window limiter: blocks until fewer than max_calls requests
+    have gone out in the trailing `period` seconds. Shared across all
+    threads using the same AzureClient instance."""
+
+    def __init__(self, max_calls: int, period: float = 60.0) -> None:
+        self.max_calls = max_calls
+        self.period = period
+        self._lock = threading.Lock()
+        self._timestamps: deque[float] = deque()
+
+    def acquire(self) -> None:
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                while self._timestamps and now - self._timestamps[0] >= self.period:
+                    self._timestamps.popleft()
+
+                if len(self._timestamps) < self.max_calls:
+                    self._timestamps.append(now)
+                    return
+
+                sleep_time = self.period - (now - self._timestamps[0])
+
+            time.sleep(max(sleep_time, 0.05))
 
 
 @dataclass(frozen=True)
@@ -35,6 +65,9 @@ class AzureClient:
         *,
         api_key: str | None = None,
         timeout: float | None = None,
+        max_retries: int = 5,
+        max_concurrent_requests: int = 4,
+        requests_per_minute: int | None = None,
     ) -> None:
         self.endpoint_url = (
             endpoint_url or os.getenv("AZURE_ENDPOINT_URL", "")
@@ -51,6 +84,19 @@ class AzureClient:
         )
 
         self.timeout = timeout or 180.0
+        self.max_retries = max_retries
+
+        # Caps concurrent in-flight requests from THIS client instance.
+        self._semaphore = threading.BoundedSemaphore(max_concurrent_requests)
+
+        # Caps actual request RATE (e.g. Azure quota RPM), independent of
+        # concurrency. A semaphore alone doesn't stop you exceeding RPM if
+        # each request is fast - this enforces the real ceiling.
+        # Set slightly below your quota (e.g. 45 for a 50 RPM limit) to
+        # leave margin for clock skew / in-flight requests.
+        self._rate_limiter = (
+            _RateLimiter(requests_per_minute) if requests_per_minute else None
+        )
 
         if not self.endpoint_url:
             raise ValueError(
@@ -95,6 +141,7 @@ class AzureClient:
         system: str | None = None,
         max_tokens: int | None = None,
         prefix: str | None = None,
+        think: bool | None = None,
         **kwargs: Any,
     ) -> AzureResponse:
 
@@ -113,9 +160,6 @@ class AzureClient:
 
         if prefix:
             if self._model_family() == "kimi_k2.6":
-                # Kimi K2.6 supports preserved thinking through the
-                # assistant reasoning_content field. Keep the actual
-                # reasoning prefix separate from normal assistant content.
                 messages.append({
                     "role": "assistant",
                     "content": "",
@@ -136,6 +180,7 @@ class AzureClient:
             messages,
             effort=resolved_effort,
             max_tokens=max_tokens,
+            think=think,
             **kwargs,
         )
 
@@ -145,11 +190,10 @@ class AzureClient:
         *,
         effort: EffortInput = ReasoningEffort.MEDIUM,
         max_tokens: int | None = None,
+        think: bool | None = None,
         **kwargs: Any,
     ) -> AzureResponse:
 
-        # Kimi K2.6 has a binary native thinking control rather than
-        # OpenAI-style low/medium/high reasoning_effort.
         if self._model_family() == "kimi_k2.6":
             resolved_effort = ReasoningEffort.from_value("medium")
         else:
@@ -159,6 +203,7 @@ class AzureClient:
             messages,
             effort,
             max_tokens=max_tokens,
+            think=think,
             **kwargs,
         )
 
@@ -175,11 +220,10 @@ class AzureClient:
         effort: EffortInput,
         *,
         max_tokens: int | None = None,
+        think: bool | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
 
-        # Clean kwargs to prevent passing internal control flags to Azure
-        kwargs.pop("think", None)
         kwargs.pop("prompt_control", None)
 
         request: dict[str, Any] = {
@@ -198,7 +242,7 @@ class AzureClient:
             request.pop("top_logprobs", None)
             if max_tokens is not None:
                 request["max_completion_tokens"] = max_tokens
-            
+
             azure_effort = (
                 effort.to_azure_effort()
                 if isinstance(effort, ReasoningEffort) and hasattr(effort, "to_azure_effort")
@@ -210,6 +254,9 @@ class AzureClient:
             if max_tokens is not None:
                 request["max_tokens"] = max_tokens
 
+        if think is not None and model_family == "kimi_k2.6":
+            request["thinking"] = {"type": "enabled" if think else "disabled"}
+
         return request
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -219,24 +266,58 @@ class AzureClient:
         }
 
         url = f"{self.endpoint_url}/chat/completions"
-        max_retries = 5
+        last_error: str | None = None
 
-        for attempt in range(max_retries):
-            response = httpx.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=self.timeout,
-            )
+        with self._semaphore:
+            for attempt in range(self.max_retries):
+                if self._rate_limiter is not None:
+                    self._rate_limiter.acquire()
 
-            if response.status_code in (429, 502, 503, 504):
-                time.sleep(2 ** attempt)
-                continue
+                try:
+                    response = httpx.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=self.timeout,
+                    )
+                except httpx.TransportError as e:
+                    last_error = f"{type(e).__name__}: {e}"
+                    time.sleep(self._backoff_seconds(attempt))
+                    continue
 
-            response.raise_for_status()
-            return response.json()
+                if response.status_code in (429, 502, 503, 504):
+                    last_error = f"HTTP {response.status_code}: {response.text[:500]}"
 
-        raise RuntimeError(f"Azure API Request failed after {max_retries} attempts.")
+                    retry_after = response.headers.get("retry-after")
+                    if retry_after is not None:
+                        try:
+                            sleep_for = float(retry_after)
+                        except ValueError:
+                            sleep_for = self._backoff_seconds(attempt)
+                    else:
+                        sleep_for = self._backoff_seconds(attempt)
+
+                    time.sleep(sleep_for)
+                    continue
+
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    raise RuntimeError(
+                        f"Azure API request failed: HTTP {response.status_code}: "
+                        f"{response.text[:500]}"
+                    ) from e
+
+                return response.json()
+
+        raise RuntimeError(
+            f"Azure API Request failed after {self.max_retries} attempts. "
+            f"Last error: {last_error}"
+        )
+
+    @staticmethod
+    def _backoff_seconds(attempt: int) -> float:
+        return (2 ** attempt) + random.uniform(0, 1)
 
     def _to_response(
         self,
@@ -244,12 +325,11 @@ class AzureClient:
         effort: ReasoningEffort,
     ) -> AzureResponse:
 
-        # Safe extraction without assuming valid choices exist
         choices = payload.get("choices") or []
         choice = choices[0] if choices else {}
         if not choice:
             choice = {}
-            
+
         message = choice.get("message") or {}
 
         return AzureResponse(
@@ -271,11 +351,6 @@ class AzureClient:
             "top_logprobs": top_logprobs,
         }
 
-        # NOTE: this Azure deployment rejects `thinking` as an unrecognized
-        # argument (400 unrecognized_request_argument), so it can't be used
-        # to suppress Kimi's reasoning before the forced-answer token.
-
-
         payload = self._build_request(
             messages,
             effort=ReasoningEffort.LOW,
@@ -285,19 +360,15 @@ class AzureClient:
 
         try:
             response_data = self._post(payload)
-            
-            # Safe extraction avoiding NoneType errors
+
             choices = response_data.get("choices") or []
             choice = choices[0] if choices else {}
             if not choice:
                 choice = {}
-                
+
             logprobs = choice.get("logprobs") or {}
 
             return {"content": logprobs.get("content") or []}
-        except httpx.HTTPStatusError as e:
-            print("HTTP", e.response.status_code, "-", e.response.text[:500])
-            return {"content": []}
         except Exception as e:
-            print(repr(e))
+            print(f"probe_logprobs failed: {e!r}")
             return {"content": []}

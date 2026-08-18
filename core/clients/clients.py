@@ -31,6 +31,7 @@ def get_client(model_name: str):
                 model=model_name,
                 endpoint_url=profile.get("endpoint_url"),
                 api_key=profile.get("api_key"),
+                requests_per_minute=40
             )
         else:
             _thread_local.client = Qwen3Client(
