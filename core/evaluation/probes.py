@@ -12,6 +12,15 @@ from core.config.config import (
 from core.evaluation.metrics import get_cut_points, find_commitment_point
 from core.clients.clients import get_model_profile, get_client
 
+# Long-lived executor for cut-point probing, shared across every call to
+# run_probe_on_item() for the life of the process. Previously a fresh
+# ThreadPoolExecutor was created per call, which meant every probe worker
+# thread was new and its thread-local OpenRouterModelClient (event loop +
+# httpx.AsyncClient) was created once and never closed - fine at a handful
+# of examples, but a real leak at thousands of tasks. Reusing this pool lets
+# thread-local clients actually be reused as intended.
+_PROBE_EXECUTOR = ThreadPoolExecutor(max_workers=PROBE_WORKERS)
+
 
 def generate_full_chain(
     question_prompt: str,
@@ -175,34 +184,33 @@ def run_probe_on_item(
 
     trajectory = [None] * len(cut_points)
 
-    with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as executor:
-        futures = {}
+    futures = {}
 
-        for index, (frac, partial_reasoning) in enumerate(cut_points):
-            if backend == "ollama":
-                future = executor.submit(
-                    probe_cut_point,
-                    question_prompt,
-                    partial_reasoning,
-                    model_name,
-                )
-            elif backend in ("openrouter", "azure"):
-                future = executor.submit(
-                    probe_cut_point_openai_compatible,
-                    question_prompt,
-                    partial_reasoning,
-                    model_name,
-                )
-            else:
-                raise ValueError(
-                    f"Unsupported backend for probing: {backend}"
-                )
+    for index, (frac, partial_reasoning) in enumerate(cut_points):
+        if backend == "ollama":
+            future = _PROBE_EXECUTOR.submit(
+                probe_cut_point,
+                question_prompt,
+                partial_reasoning,
+                model_name,
+            )
+        elif backend in ("openrouter", "azure"):
+            future = _PROBE_EXECUTOR.submit(
+                probe_cut_point_openai_compatible,
+                question_prompt,
+                partial_reasoning,
+                model_name,
+            )
+        else:
+            raise ValueError(
+                f"Unsupported backend for probing: {backend}"
+            )
 
-            futures[future] = (index, frac)
+        futures[future] = (index, frac)
 
-        for future in as_completed(futures):
-            index, frac = futures[future]
-            trajectory[index] = (frac, future.result())
+    for future in as_completed(futures):
+        index, frac = futures[future]
+        trajectory[index] = (frac, future.result())
 
     commitment_point = find_commitment_point(trajectory)
 
