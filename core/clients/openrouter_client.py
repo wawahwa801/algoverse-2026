@@ -92,6 +92,25 @@ class OpenRouterClient:
         response.raise_for_status()
         data = response.json()
 
+        if "choices" not in data:
+            # A 200 response with no choices means OpenRouter couldn't
+            # route the request (e.g. no upstream provider satisfies
+            # require_parameters for this exact combination of params) -
+            # raise_for_status() doesn't catch this since the HTTP status
+            # is still 200. Surface the real reason instead of a bare
+            # KeyError('choices').
+            error_info = data.get("error") if isinstance(data, dict) else None
+            message = (
+                error_info.get("message")
+                if isinstance(error_info, dict)
+                else None
+            )
+            raise RuntimeError(
+                f"OpenRouter returned no choices for model={model!r} "
+                f"(effort={effort!r}, logprobs={logprobs}): "
+                f"{message or data}"
+            )
+
         choice = data["choices"][0]
         message = choice["message"]
         return OpenRouterResponse(

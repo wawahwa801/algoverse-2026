@@ -112,10 +112,18 @@ def probe_cut_point_openai_compatible(
         "the answer is number ("
     )
 
-    logprobs = client.probe_logprobs(
-        forced_prompt,
-        top_logprobs=TOP_LOGPROBS,
-    )
+    try:
+        logprobs = client.probe_logprobs(
+            forced_prompt,
+            top_logprobs=TOP_LOGPROBS,
+        )
+    except Exception as e:
+        # A routing/provider failure on one cut point (e.g. no upstream
+        # provider satisfies require_parameters for this request) shouldn't
+        # take down the whole condition's result - degrade this single cut
+        # to None, same as the existing "missing logprobs" case below.
+        print(f"Probe request failed, treating this cut point as missing: {e}")
+        return None
 
     content = (logprobs or {}).get("content") or []
 
