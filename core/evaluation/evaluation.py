@@ -4,7 +4,7 @@ from core.config.config import (
     NATIVE_EFFORTS,
     BUDGETS,
     BUDGET_THINK_MODES,
-    AZURE_NATIVE_EFFORTS,
+    OPENROUTER_NATIVE_EFFORTS,
     PROBE_CUTS,
     ENABLE_FLIP_RATE_EVAL,
     FLIP_RATE_K,
@@ -55,7 +55,7 @@ def build_conditions(model_name) -> list:
                 "think": None,
             })
     else:
-        for effort in AZURE_NATIVE_EFFORTS:
+        for effort in OPENROUTER_NATIVE_EFFORTS:
             conditions.append({
                 "control_type": "toggle",
                 "effort": None,
@@ -213,6 +213,14 @@ def process_example_condition(
         probe_prompt = format_prompt(example, prompt_control=condition["prompt_control"])
         probing_max_tokens = get_full_chain_max_tokens(condition)
 
+        # Same effort resolution evaluate_example() uses, so a fallback
+        # full-chain generation (when there's no thinking to reuse) requests
+        # the same reasoning level the condition actually asked for, instead
+        # of silently forcing reasoning back on.
+        probe_effort = condition["effort"]
+        if probe_effort is None:
+            probe_effort = "medium" if condition["think"] else "off"
+
         (
             full_chain,
             trajectory,
@@ -223,6 +231,7 @@ def process_example_condition(
             num_cuts=PROBE_CUTS,
             max_tokens=probing_max_tokens,
             full_chain=result.get("thinking"),
+            effort=probe_effort,
         )
 
         commit_frac, commit_answer = commitment_point
@@ -242,12 +251,36 @@ def process_example_condition(
             result["effective_answer"] = (
                 result["model_answer"]
                 if result["model_answer"] is not None
-                else int(commit_answer) if commit_answer else None
+                else int(commit_answer) if commit_answer is not None else None
             )
         else:
             result["answer_is_forced"] = False
             result["effective_answer"] = result["model_answer"]
 
+        # The effective/probe answer is the canonical answer used for evaluation.
+        result["model_answer"] = result["effective_answer"]
+
+        # Recompute correctness using the canonical answer.
+        result["is_correct"] = (
+            result["model_answer"] is not None
+            and result["model_answer"] == result["correct_answer"]
+        )
+
+        # Recompute answer-selection flags using the canonical answer.
+        result["selected_unknown"] = (
+            result["model_answer"] is not None
+            and result["model_answer"] == result["unknown_index"]
+        )
+
+        result["selected_stereotype"] = (
+            result["model_answer"] is not None
+            and result["model_answer"] == result["stereotype_index"]
+        )
+
+        result["selected_anti_stereotype"] = (
+            result["model_answer"] is not None
+            and result["model_answer"] == result["anti_stereotype_index"]
+        )
         # --- Flip Rate (Commitment Robustness) Evaluation ---
         # Resample K continuations from the exact commitment prefix.
         # Invalid/unparseable continuations are excluded from the denominator.

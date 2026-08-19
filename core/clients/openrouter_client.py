@@ -67,12 +67,26 @@ class OpenRouterClient:
         }
         if effort is not None:
             payload["reasoning"] = {"effort": effort}
+        else:
+            # Omitting "reasoning" entirely just falls back to the
+            # provider's default, which is NOT guaranteed to be off for
+            # hybrid-reasoning models (e.g. Kimi K2.6 may reason by
+            # default). Send an explicit disable so think=off conditions
+            # (and the no-reasoning probe calls) reliably turn thinking off.
+            payload["reasoning"] = {"enabled": False}
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
         if logprobs:
             payload["logprobs"] = True
             if top_logprobs is not None:
                 payload["top_logprobs"] = top_logprobs
+            # OpenRouter load-balances this model across several upstream
+            # providers; not all of them actually return logprobs even when
+            # requested, which silently yields an empty logprobs.content on
+            # affected requests instead of an error. Restrict routing to
+            # providers that support every parameter we sent (logprobs
+            # included) so probing doesn't intermittently come back empty.
+            payload["provider"] = {"require_parameters": True}
 
         response = await self._client.post("/chat/completions", json=payload)
         response.raise_for_status()

@@ -109,7 +109,7 @@ def get_condition(record):
 
 
 def add_evaluation_labels(record):
-    prediction = record.get("effective_answer", record.get("model_answer"))
+    prediction = record.get("model_answer")
 
     unknown_index = record.get("unknown_index")
     stereotype_index = record.get("stereotype_index")

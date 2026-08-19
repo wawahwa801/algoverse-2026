@@ -17,6 +17,7 @@ def generate_full_chain(
     question_prompt: str,
     model_name: str,
     max_tokens: int = 2048,
+    effort: str = "medium",
 ) -> str:
     backend = get_model_profile(model_name)["backend"]
 
@@ -37,7 +38,7 @@ def generate_full_chain(
     client = get_client(model_name)
     response = client.ask(
         question_prompt,
-        effort="medium",
+        effort=effort,
         max_tokens=max_tokens,
     )
 
@@ -147,6 +148,7 @@ def run_probe_on_item(
     num_cuts: int = 4,
     max_tokens: int = 2048,
     full_chain: str = None,
+    effort: str = "medium",
 ):
     backend = get_model_profile(model_name)["backend"]
 
@@ -155,6 +157,7 @@ def run_probe_on_item(
             question_prompt,
             model_name,
             max_tokens=max_tokens,
+            effort=effort,
         )
 
     cut_points = get_cut_points(

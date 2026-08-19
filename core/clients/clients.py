@@ -24,7 +24,8 @@ def get_client(model_name: str):
 
         if profile["backend"] == "openrouter":
             _thread_local.client = OpenRouterModelClient(
-                model_id=profile["model_id"]
+                model_id=profile["model_id"],
+                api_key=profile["api_key"]
             )
         elif profile["backend"] == "azure":
             _thread_local.client = AzureClient(
