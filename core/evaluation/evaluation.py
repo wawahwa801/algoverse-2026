@@ -92,7 +92,15 @@ def build_conditions(model_name) -> list:
 
     return conditions
 
-
+def get_max_tokens(condition: dict) -> int:
+    control_type = condition["control_type"]
+    if control_type == "native_effort":
+        effort = condition.get("effort")
+        if effort == "low": return 3000
+        if effort == "medium": return 8000
+        if effort == "high": return 15000
+        return 10000
+        
 def evaluate_example(
     client,
     example: dict,
@@ -123,11 +131,12 @@ def evaluate_example(
         # cap too. This does NOT change the recorded `max_tokens` condition
         # field below (still None) - that field means "no explicit budget
         # by design", not "what was actually sent to the client".
-        request_max_tokens = get_full_chain_max_tokens({
+        request_max_tokens = get_max_tokens({
             "control_type": control_type,
             "effort": effort,
         })
 
+        
     start_time = time.perf_counter()
 
     # Pass the prefix downstream to the client to pre-fill the reasoning sequence
