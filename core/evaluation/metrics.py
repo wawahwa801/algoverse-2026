@@ -482,7 +482,8 @@ def save_csv(results, path):
         "thinking_chars", "latency_seconds", "probe_final_answer",
         "commitment_point_frac", "first_stereotype_mention_pct",
         "first_anti_stereotype_mention_pct", "flip_rate",
-        "evidence_alignment", "is_twin", "twin_partner_uid", "twin_side" 
+        "evidence_alignment", "is_twin", "twin_partner_uid", "twin_side",
+        "status", "error",
     ]
 
     with open(path, "w", newline="", encoding="utf-8") as file:
@@ -600,7 +601,7 @@ def print_summary(results):
 
 
 def main():
-    records = load_results(Path(__file__).resolve().parent.parent/"results"/"bbq_results_kimi-k2.6.csv")
+    records = load_results(Path(__file__).resolve().parent.parent/"results"/"bbq_results_qwen3.5-9b.csv")
     unique_uids = {record.get("uid") for record in records if record.get("uid") is not None}
 
     print("Loaded rows:", len(records))

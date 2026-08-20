@@ -36,7 +36,8 @@ def get_client(model_name: str):
             )
         else:
             _thread_local.client = Qwen3Client(
-                model=profile["model_id"]
+                model=profile["model_id"],
+                timeout=None
             )
 
     return _thread_local.client

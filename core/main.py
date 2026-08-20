@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import time
 import argparse
@@ -37,19 +38,32 @@ from core.evaluation.evaluation import (
 )
 
 
+def _result_key(result_or_example, condition=None):
+    """Canonical resume key: one result per UID + experiment condition."""
+    if condition is None:
+        return (
+            str(result_or_example.get("uid")),
+            get_condition_name(result_or_example),
+        )
+    return (
+        str(result_or_example["uid"]),
+        get_condition_name(condition),
+    )
+
+
 def save_checkpoint(results):
+    """Atomically save successful results so an interrupted run never leaves a partial JSON."""
     try:
         RESULTS_JSON.parent.mkdir(parents=True, exist_ok=True)
-        save_json(results, RESULTS_JSON)
+        temp_path = RESULTS_JSON.with_suffix(RESULTS_JSON.suffix + ".tmp")
+        save_json(results, temp_path)
+        os.replace(temp_path, RESULTS_JSON)
     except Exception as e:
-        print(f"Checkpoint save failed: {e}")
+        print(f"Checkpoint save failed: {type(e).__name__}: {e}", flush=True)
 
 
 def load_twin_pair_dataset():
-    """Load the frozen, opposite-alignment-filtered twin-pair subset (with
-    matched ambiguous siblings) - the same canonical dataset models/eval.py
-    uses. build_items() is a kept-in-sync local copy
-    (core/utility/bbq_sample.py), not a cross-package import."""
+    """Load the frozen, opposite-alignment-filtered twin-pair subset."""
     twins = load_jsonl(PAIRS_DATASET_PATH)
     clean = load_jsonl(CLEAN_DATASET_PATH)
     clean_by_uid = {row["uid"]: row for row in clean}
@@ -129,8 +143,6 @@ def main():
     print(f"Ambiguous examples: {ambiguous_count}")
     print(f"Disambiguated examples: {disambiguated_count}")
 
-    # Kimi K2.6 has a binary native thinking control (on/off), while models
-    # such as Qwen can keep the configured low/medium/high native controls.
     conditions = build_conditions(model_name=MODEL)
 
     total_tasks = len(dataset) * len(conditions)
@@ -146,8 +158,8 @@ def main():
         for condition in conditions
     ]
 
-    all_results = []
-    completed_keys = set()
+    # Dict instead of list: guarantees one canonical completed record per task key.
+    result_by_key = {}
 
     if RESULTS_JSON.exists() and RESULTS_JSON.stat().st_size > 0:
         try:
@@ -162,42 +174,36 @@ def main():
 
         if isinstance(existing_results, list):
             for result in existing_results:
-                if "error" in result:
+                if result.get("error") or result.get("status") == "error":
                     continue
 
-                # New results carry experiment_model. For older files, fall
-                # back to the stored model field; mismatched-model records are
-                # not loaded into the current run and therefore cannot pollute
-                # another model's resume state.
                 result_model = result.get("experiment_model", result.get("model"))
                 if not _same_model(result_model, MODEL):
                     continue
 
-                all_results.append(result)
-                completed_keys.add((
-                    str(result["uid"]),
-                    get_condition_name(result),
-                ))
+                key = _result_key(result)
+                result_by_key[key] = result
+
+            completed_keys = set(result_by_key)
 
             tasks = [
                 (example, condition)
                 for example, condition in tasks
-                if (
-                    str(example["uid"]),
-                    get_condition_name(condition),
-                ) not in completed_keys
+                if _result_key(example, condition) not in completed_keys
             ]
 
             print(
-                f"Resuming: {len(completed_keys)} task(s) already completed, "
+                f"Resuming: {len(completed_keys)} unique task(s) already completed, "
                 f"{len(tasks)} remaining."
             )
+        else:
+            print("Warning: existing JSON was not a list; starting fresh.")
 
-            total_tasks = len(tasks)
-
+    total_tasks = len(tasks)
     start_time = time.perf_counter()
     tasks_completed = 0
 
+    # Keep local Ollama concurrency conservative for long reasoning generations.
     with ThreadPoolExecutor(max_workers=TASK_WORKERS) as executor:
         futures = {
             executor.submit(
@@ -215,34 +221,48 @@ def main():
 
             try:
                 result = future.result()
-                all_results.append(result)
+                if result.get("error") or result.get("status") == "error":
+                    print(
+                        f"Task failed after retries: UID={example.get('uid')} "
+                        f"condition={get_condition_name(condition)} "
+                        f"error={result.get('error')}",
+                        flush=True,
+                    )
+                else:
+                    result_by_key[_result_key(result)] = result
             except Exception as e:
-                print(f"Worker error for UID={example.get('uid', 'unknown')}: {e}")
+                print(
+                    f"Worker error for UID={example.get('uid', 'unknown')} "
+                    f"condition={get_condition_name(condition)} "
+                    f"{type(e).__name__}: {e}",
+                    flush=True,
+                )
 
             elapsed = time.perf_counter() - start_time
             average_time = elapsed / tasks_completed
             remaining = total_tasks - tasks_completed
             eta = average_time * remaining
-
             progress = (tasks_completed / total_tasks * 100) if total_tasks > 0 else 100
 
             print(
                 f"Progress: {tasks_completed}/{total_tasks} "
-                f"({progress:.1f}%) | elapsed {elapsed / 60:.1f}m | ETA {eta / 60:.1f}m"
+                f"({progress:.1f}%) | elapsed {elapsed / 60:.1f}m | ETA {eta / 60:.1f}m",
+                flush=True,
             )
 
             if tasks_completed % CHECKPOINT_INTERVAL == 0:
-                save_checkpoint(all_results)
+                save_checkpoint(list(result_by_key.values()))
 
     total_elapsed = time.perf_counter() - start_time
+    all_results = list(result_by_key.values())
 
     RESULTS_JSON.parent.mkdir(parents=True, exist_ok=True)
     RESULTS_CSV.parent.mkdir(parents=True, exist_ok=True)
 
-    save_json(all_results, RESULTS_JSON)
+    save_checkpoint(all_results)
     save_csv(all_results, RESULTS_CSV)
 
-    print(f"\nFinished processing {len(all_results)} results.")
+    print(f"\nFinished processing {len(all_results)} unique successful results.")
     print(f"Total runtime: {total_elapsed / 60:.2f} minutes")
     print(f"JSON saved to: {RESULTS_JSON}")
     print(f"CSV saved to: {RESULTS_CSV}\n")

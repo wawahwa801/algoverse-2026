@@ -1,4 +1,10 @@
 import time
+import os
+import sys
+import subprocess
+import threading
+
+import httpx
 
 from core.config.config import (
     NATIVE_EFFORTS,
@@ -24,6 +30,160 @@ from core.evaluation.metrics import (
 from core.evaluation.probes import run_probe_on_item
 
 
+
+
+# Ollama recovery/retry settings. Keep retries fairly conservative because a
+# failed long generation can already have stressed the local server.
+OLLAMA_MAX_RETRIES = int(os.getenv("OLLAMA_MAX_RETRIES", "5"))
+OLLAMA_RETRY_BASE_SECONDS = float(os.getenv("OLLAMA_RETRY_BASE_SECONDS", "2"))
+OLLAMA_HEALTH_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_HEALTH_TIMEOUT_SECONDS", "5"))
+OLLAMA_HEALTH_URL = os.getenv("OLLAMA_HEALTH_URL", "http://127.0.0.1:11434/api/tags")
+_OLLAMA_RECOVERY_LOCK = threading.Lock()
+
+
+def _is_retryable_ollama_error(exc: Exception) -> bool:
+    """Return True for transient Ollama/network failures worth retrying."""
+    text = str(exc).lower()
+
+    retryable_text = (
+        "failed to connect to ollama",
+        "server disconnected",
+        "connection refused",
+        "connection reset",
+        "connection aborted",
+        "remote protocol error",
+        "server disconnected without sending a response",
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+        "502",
+        "503",
+        "504",
+    )
+    if any(term in text for term in retryable_text):
+        return True
+
+    return isinstance(
+        exc,
+        (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.ReadError,
+            httpx.ReadTimeout,
+            httpx.WriteError,
+            httpx.WriteTimeout,
+            httpx.PoolTimeout,
+        ),
+    )
+
+
+def _ollama_healthy() -> bool:
+    try:
+        response = httpx.get(
+            OLLAMA_HEALTH_URL,
+            timeout=OLLAMA_HEALTH_TIMEOUT_SECONDS,
+        )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+def _restart_ollama() -> None:
+    """Best-effort local Ollama recovery. Safe to call repeatedly."""
+    with _OLLAMA_RECOVERY_LOCK:
+        if _ollama_healthy():
+            return
+
+        print("Ollama health check failed; attempting local recovery...", flush=True)
+
+        try:
+            if sys.platform == "darwin":
+                # On macOS, reopening the Ollama app is the least invasive way
+                # to bring its local daemon back. This returns immediately.
+                subprocess.Popen(
+                    ["open", "-a", "Ollama"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            else:
+                # On Linux/other environments, start the Ollama daemon if it is down.
+                subprocess.Popen(
+                    ["ollama", "serve"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+        except Exception as recovery_error:
+            print(
+                f"Ollama restart attempt failed: {type(recovery_error).__name__}: "
+                f"{recovery_error}",
+                flush=True,
+            )
+
+        # Give the daemon/app a chance to come back before the caller retries.
+        for _ in range(OLLAMA_MAX_RETRIES):
+            time.sleep(2)
+            if _ollama_healthy():
+                print("Ollama recovered.", flush=True)
+                return
+
+        print("Ollama is still unavailable after recovery attempt.", flush=True)
+
+
+def _ask_with_retries(client, prompt, *, effort, max_tokens, prefix=None):
+    """Run one model request with retry + Ollama recovery."""
+    last_error = None
+
+    for attempt in range(OLLAMA_MAX_RETRIES + 1):
+        try:
+            return client.ask(
+                prompt,
+                effort=effort,
+                max_tokens=max_tokens,
+                prefix=prefix,
+            )
+        except Exception as exc:
+            last_error = exc
+            if not _is_retryable_ollama_error(exc) or attempt >= OLLAMA_MAX_RETRIES:
+                raise
+
+            delay = OLLAMA_RETRY_BASE_SECONDS * (2 ** attempt)
+            print(
+                f"Ollama request failed (attempt {attempt + 1}/{OLLAMA_MAX_RETRIES + 1}) "
+                f"with {type(exc).__name__}: {exc}. "
+                f"Recovering/retrying in {delay:.1f}s...",
+                flush=True,
+            )
+            _restart_ollama()
+            time.sleep(delay)
+
+    raise last_error
+
+
+def _run_probe_with_retries(**kwargs):
+    """Run the probe; restart/retry on transient local Ollama failures."""
+    last_error = None
+
+    for attempt in range(OLLAMA_MAX_RETRIES + 1):
+        try:
+            return run_probe_on_item(**kwargs)
+        except Exception as exc:
+            last_error = exc
+            if not _is_retryable_ollama_error(exc) or attempt >= OLLAMA_MAX_RETRIES:
+                raise
+
+            delay = OLLAMA_RETRY_BASE_SECONDS * (2 ** attempt)
+            print(
+                f"Ollama probe failed (attempt {attempt + 1}/{OLLAMA_MAX_RETRIES + 1}) "
+                f"with {type(exc).__name__}: {exc}. "
+                f"Recovering/retrying in {delay:.1f}s...",
+                flush=True,
+            )
+            _restart_ollama()
+            time.sleep(delay)
+
+    raise last_error
 
 
 def get_full_chain_max_tokens(condition: dict) -> int:
@@ -101,11 +261,12 @@ def evaluate_example(
 
     # Pass the prefix downstream to the client to pre-fill the reasoning sequence
     # (Client wrapper should appropriately inject this for Thought Anchor continuations)
-    response: Qwen3Response = client.ask(
+    response: Qwen3Response = _ask_with_retries(
+        client,
         prompt,
         effort=request_effort,
         max_tokens=max_tokens,
-        prefix=prefix
+        prefix=prefix,
     )
 
     elapsed = time.perf_counter() - start_time
@@ -225,7 +386,7 @@ def process_example_condition(
             full_chain,
             trajectory,
             commitment_point,
-        ) = run_probe_on_item(
+        ) = _run_probe_with_retries(
             question_prompt=probe_prompt,
             model_name=model_name,
             num_cuts=PROBE_CUTS,
@@ -327,10 +488,19 @@ def process_example_condition(
                     result["flip_flips"] / result["flip_valid_resamples"]
                 )
 
+        result["status"] = "success"
+        result["error"] = None
         return result
 
     except Exception as e:
-        print(f"ERROR processing UID={example['uid']} with condition {condition_name}: {e}")
+        print(
+            f"ERROR processing UID={example['uid']} "
+            f"category={example.get('category')} "
+            f"context={example.get('context_condition')} "
+            f"condition={condition_name} "
+            f"{type(e).__name__}: {e}",
+            flush=True,
+        )
         return {
             "uid": example["uid"],
             "category": example.get("category"),
@@ -344,6 +514,7 @@ def process_example_condition(
             "max_tokens": condition["max_tokens"],
             "prompt_control": condition["prompt_control"],
             "think": condition["think"],
-            "error": str(e),
+            "status": "error",
+            "error": f"{type(e).__name__}: {e}",
             "flip_rate": None,
         }
