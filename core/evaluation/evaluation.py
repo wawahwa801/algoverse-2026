@@ -1,4 +1,5 @@
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.config.config import (
     NATIVE_EFFORTS,
@@ -22,6 +23,19 @@ from core.evaluation.metrics import (
 
 )
 from core.evaluation.probes import run_probe_on_item
+
+# Long-lived, bounded pool for flip-rate resampling, shared across the whole
+# run for the same reason probes.py's _PROBE_EXECUTOR is: a per-call
+# executor would leak a fresh thread-local client per resample. The K
+# resamples for one item are independent of each other, so running them
+# concurrently (instead of the previous plain `for` loop) turns K sequential
+# full-length generations into ~1, which matters a lot once K=FLIP_RATE_K
+# full generations were the dominant per-task cost.
+_RESAMPLE_EXECUTOR = (
+    ThreadPoolExecutor(max_workers=max(FLIP_RATE_K, 1))
+    if ENABLE_FLIP_RATE_EVAL
+    else None
+)
 
 
 
@@ -97,6 +111,23 @@ def evaluate_example(
     if request_effort is None:
         request_effort = "medium" if think is True else "off"
 
+    request_max_tokens = max_tokens
+    if request_max_tokens is None:
+        # native_effort conditions (and Kimi's think on/off toggle) don't
+        # set an explicit token budget, which previously meant the main
+        # generation call ran fully uncapped. A single long high-effort
+        # completion can tie up a parallel serving slot for an
+        # unpredictable amount of time - hurting both GPU utilization and
+        # run-time variance. Reuse the same effort->token mapping already
+        # used for probe fallback generation so the main call gets a sane
+        # cap too. This does NOT change the recorded `max_tokens` condition
+        # field below (still None) - that field means "no explicit budget
+        # by design", not "what was actually sent to the client".
+        request_max_tokens = get_full_chain_max_tokens({
+            "control_type": control_type,
+            "effort": effort,
+        })
+
     start_time = time.perf_counter()
 
     # Pass the prefix downstream to the client to pre-fill the reasoning sequence
@@ -104,7 +135,7 @@ def evaluate_example(
     response: Qwen3Response = client.ask(
         prompt,
         effort=request_effort,
-        max_tokens=max_tokens,
+        max_tokens=request_max_tokens,
         prefix=prefix
     )
 
@@ -190,12 +221,38 @@ def process_example_condition(
             prompt_control=condition["prompt_control"],
             think=condition["think"],
         )
+    except Exception as e:
+        print(f"ERROR processing UID={example['uid']} with condition {condition_name}: {e}")
+        return {
+            "uid": example["uid"],
+            "category": example.get("category"),
+            "subcategory": example.get("subcategory"),
+            "question_index": example.get("question_index"),
+            "question_polarity": example.get("question_polarity"),
+            "context_condition": example.get("context_condition"),
+            "model": model_name,
+            "control_type": condition["control_type"],
+            "effort": condition["effort"],
+            "max_tokens": condition["max_tokens"],
+            "prompt_control": condition["prompt_control"],
+            "think": condition["think"],
+            "error": str(e),
+            "flip_rate": None,
+        }
 
+    # Probing, commitment-point analysis, canonical-answer promotion, and
+    # flip-rate resampling are all "enrichment" on top of the primary
+    # answer above. A failure anywhere in here (e.g. a probe request
+    # hitting an OpenRouter routing error) should degrade those fields to
+    # None rather than discarding the already-successful primary result -
+    # otherwise a single flaky probe call silently throws away a good
+    # model_answer/is_correct and replaces it with a bare error record.
+    try:
         thinking_text = result.get("thinking") or ""
 
         stereotype_terms = keyword_terms(example, result["stereotype_index"])
         anti_stereotype_terms = keyword_terms(example, result["anti_stereotype_index"])
-        
+
         stereotype_mentions = find_mentions(thinking_text, stereotype_terms)
         anti_stereotype_mentions = find_mentions(thinking_text, anti_stereotype_terms)
 
@@ -235,7 +292,7 @@ def process_example_condition(
         )
 
         commit_frac, commit_answer = commitment_point
-        
+
         result["probe_final_answer"] = commit_answer
         result["commitment_point_frac"] = commit_frac
         result["commitment_depth_chars"] = (
@@ -257,30 +314,28 @@ def process_example_condition(
             result["answer_is_forced"] = False
             result["effective_answer"] = result["model_answer"]
 
-        # The effective/probe answer is the canonical answer used for evaluation.
+        # The effective/probe answer is the canonical answer used for
+        # evaluation - promote it into model_answer and recompute every
+        # field derived from it, so evaluation.py -> CSV -> metrics.py all
+        # agree on a single canonical answer.
         result["model_answer"] = result["effective_answer"]
-
-        # Recompute correctness using the canonical answer.
         result["is_correct"] = (
             result["model_answer"] is not None
             and result["model_answer"] == result["correct_answer"]
         )
-
-        # Recompute answer-selection flags using the canonical answer.
         result["selected_unknown"] = (
             result["model_answer"] is not None
             and result["model_answer"] == result["unknown_index"]
         )
-
         result["selected_stereotype"] = (
             result["model_answer"] is not None
             and result["model_answer"] == result["stereotype_index"]
         )
-
         result["selected_anti_stereotype"] = (
             result["model_answer"] is not None
             and result["model_answer"] == result["anti_stereotype_index"]
         )
+
         # --- Flip Rate (Commitment Robustness) Evaluation ---
         # Resample K continuations from the exact commitment prefix.
         # Invalid/unparseable continuations are excluded from the denominator.
@@ -299,9 +354,14 @@ def process_example_condition(
             prefix_length = int(len(full_chain) * commit_frac)
             reasoning_prefix = full_chain[:prefix_length]
 
-            for _ in range(FLIP_RATE_K):
-                resample = evaluate_example(
-                    client=client,
+            def _resample():
+                # Each worker thread gets its own thread-local client
+                # rather than reusing the calling thread's `client`, same
+                # pattern as get_client() everywhere else - avoids sharing
+                # one client instance across concurrent threads.
+                resample_client = get_client(model_name)
+                return evaluate_example(
+                    client=resample_client,
                     example=example,
                     control_type=condition["control_type"],
                     effort=condition["effort"],
@@ -310,6 +370,23 @@ def process_example_condition(
                     think=condition["think"],
                     prefix=reasoning_prefix,
                 )
+
+            resample_futures = [
+                _RESAMPLE_EXECUTOR.submit(_resample) for _ in range(FLIP_RATE_K)
+            ]
+
+            for future in as_completed(resample_futures):
+                try:
+                    resample = future.result()
+                except Exception as e:
+                    # One flaky resample shouldn't drop the rest of the
+                    # flip-rate loop - count it as invalid and move on.
+                    print(
+                        f"Flip-rate resample failed for UID={example['uid']} "
+                        f"condition {condition_name}: {e}"
+                    )
+                    result["flip_invalid_resamples"] += 1
+                    continue
 
                 resampled_answer = resample.get("model_answer")
 
@@ -327,23 +404,24 @@ def process_example_condition(
                     result["flip_flips"] / result["flip_valid_resamples"]
                 )
 
-        return result
-
     except Exception as e:
-        print(f"ERROR processing UID={example['uid']} with condition {condition_name}: {e}")
-        return {
-            "uid": example["uid"],
-            "category": example.get("category"),
-            "subcategory": example.get("subcategory"),
-            "question_index": example.get("question_index"),
-            "question_polarity": example.get("question_polarity"),
-            "context_condition": example.get("context_condition"),
-            "model": model_name,
-            "control_type": condition["control_type"],
-            "effort": condition["effort"],
-            "max_tokens": condition["max_tokens"],
-            "prompt_control": condition["prompt_control"],
-            "think": condition["think"],
-            "error": str(e),
-            "flip_rate": None,
-        }
+        print(
+            f"Probe/commitment step failed for UID={example['uid']} "
+            f"condition {condition_name}: {e}; keeping primary answer, "
+            "degrading probe-derived fields to None."
+        )
+        result.setdefault("probe_final_answer", None)
+        result.setdefault("commitment_point_frac", None)
+        result.setdefault("commitment_depth_chars", None)
+        result.setdefault("full_chain_generated", None)
+        result.setdefault("probe_trajectory", None)
+        result.setdefault("answer_is_forced", False)
+        result.setdefault("effective_answer", result.get("model_answer"))
+        result.setdefault("flip_rate", None)
+        result.setdefault("flip_flips", 0)
+        result.setdefault("flip_valid_resamples", 0)
+        result.setdefault("flip_invalid_resamples", 0)
+        result.setdefault("flip_k", FLIP_RATE_K if ENABLE_FLIP_RATE_EVAL else 0)
+        result["probe_error"] = str(e)
+
+    return result
