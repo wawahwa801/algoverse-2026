@@ -1,6 +1,3 @@
-"""Exploratory test: does raising the budget-forced token cap (2048/4096/8192)
-eliminate invalid answers? Does not change config.BUDGETS - one-off comparison
-with its own output files."""
 
 import sys
 import time
@@ -17,8 +14,7 @@ from core.main import load_twin_pair_dataset, normalize_dataset
 from core.evaluation.evaluation import process_example_condition
 from core.evaluation.metrics import save_json, save_csv
 
-# Measure whether the model finishes naturally at each budget - the forced-
-# answer fallback would mask exactly that signal.
+
 config.ENABLE_FORCED_ANSWER = False
 
 SAMPLE_PAIRS = 5

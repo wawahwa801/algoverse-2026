@@ -18,9 +18,7 @@ EffortInput = Union[ReasoningEffort, str, bool, None]
 
 
 class _RateLimiter:
-    """Sliding-window limiter: blocks until fewer than max_calls requests
-    have gone out in the trailing `period` seconds. Shared across all
-    threads using the same AzureClient instance."""
+
 
     def __init__(self, max_calls: int, period: float = 60.0) -> None:
         self.max_calls = max_calls

@@ -39,7 +39,7 @@ from core.evaluation.evaluation import (
 
 
 def _result_key(result_or_example, condition=None):
-    """Canonical resume key: one result per UID + experiment condition."""
+
     if condition is None:
         return (
             str(result_or_example.get("uid")),
@@ -52,7 +52,7 @@ def _result_key(result_or_example, condition=None):
 
 
 def save_checkpoint(results):
-    """Atomically save successful results so an interrupted run never leaves a partial JSON."""
+
     try:
         RESULTS_JSON.parent.mkdir(parents=True, exist_ok=True)
         temp_path = RESULTS_JSON.with_suffix(RESULTS_JSON.suffix + ".tmp")
@@ -63,7 +63,7 @@ def save_checkpoint(results):
 
 
 def load_twin_pair_dataset():
-    """Load the frozen, opposite-alignment-filtered twin-pair subset."""
+
     twins = load_jsonl(PAIRS_DATASET_PATH)
     clean = load_jsonl(CLEAN_DATASET_PATH)
     clean_by_uid = {row["uid"]: row for row in clean}
@@ -158,7 +158,7 @@ def main():
         for condition in conditions
     ]
 
-    # Dict instead of list: guarantees one canonical completed record per task key.
+
     result_by_key = {}
 
     if RESULTS_JSON.exists() and RESULTS_JSON.stat().st_size > 0:
@@ -203,7 +203,7 @@ def main():
     start_time = time.perf_counter()
     tasks_completed = 0
 
-    # Keep local Ollama concurrency conservative for long reasoning generations.
+
     with ThreadPoolExecutor(max_workers=TASK_WORKERS) as executor:
         futures = {
             executor.submit(

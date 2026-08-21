@@ -1,11 +1,4 @@
-"""Run the same reasoning-budget sweep as run_openrouter_sweep.py, but
-against qwen3.5:9b via Ollama - either locally or on a remote GPU reachable
-over HTTP. Same sample (bbq_sample.load_sample), same conditions, same result
-schema so runs can be concatenated for analysis.
 
-Point at a remote GPU by setting OLLAMA_HOST, e.g.:
-    OLLAMA_HOST=http://<lightning-ai-instance>:11434 python core/scripts/run_qwen_local_sweep.py
-"""
 
 import json
 import os

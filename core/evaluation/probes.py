@@ -12,13 +12,7 @@ from core.config.config import (
 from core.evaluation.metrics import get_cut_points, find_commitment_point
 from core.clients.clients import get_model_profile, get_client
 
-# Long-lived executor for cut-point probing, shared across every call to
-# run_probe_on_item() for the life of the process. Previously a fresh
-# ThreadPoolExecutor was created per call, which meant every probe worker
-# thread was new and its thread-local OpenRouterModelClient (event loop +
-# httpx.AsyncClient) was created once and never closed - fine at a handful
-# of examples, but a real leak at thousands of tasks. Reusing this pool lets
-# thread-local clients actually be reused as intended.
+
 _PROBE_EXECUTOR = ThreadPoolExecutor(max_workers=PROBE_WORKERS)
 
 
@@ -81,7 +75,7 @@ def probe_cut_point(
         top_logprobs=TOP_LOGPROBS,
     )
 
-    # Hardened extraction layer
+
     logprobs = response.get("logprobs") or []
 
     if not logprobs:
@@ -127,10 +121,7 @@ def probe_cut_point_openai_compatible(
             top_logprobs=TOP_LOGPROBS,
         )
     except Exception as e:
-        # A routing/provider failure on one cut point (e.g. no upstream
-        # provider satisfies require_parameters for this request) shouldn't
-        # take down the whole condition's result - degrade this single cut
-        # to None, same as the existing "missing logprobs" case below.
+
         print(f"Probe request failed, treating this cut point as missing: {e}")
         return None
 
@@ -139,7 +130,7 @@ def probe_cut_point_openai_compatible(
     if not content:
         return None
 
-    # Hardened extraction layer
+
     first_item = content[0] or {}
     top_logprobs = first_item.get("top_logprobs") or []
     raw_probs = {}

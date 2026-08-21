@@ -32,8 +32,7 @@ from core.evaluation.probes import run_probe_on_item
 
 
 
-# Ollama recovery/retry settings. Keep retries fairly conservative because a
-# failed long generation can already have stressed the local server.
+
 OLLAMA_MAX_RETRIES = int(os.getenv("OLLAMA_MAX_RETRIES", "5"))
 OLLAMA_RETRY_BASE_SECONDS = float(os.getenv("OLLAMA_RETRY_BASE_SECONDS", "2"))
 OLLAMA_HEALTH_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_HEALTH_TIMEOUT_SECONDS", "5"))
@@ -42,7 +41,7 @@ _OLLAMA_RECOVERY_LOCK = threading.Lock()
 
 
 def _is_retryable_ollama_error(exc: Exception) -> bool:
-    """Return True for transient Ollama/network failures worth retrying."""
+
     text = str(exc).lower()
 
     retryable_text = (
@@ -89,7 +88,7 @@ def _ollama_healthy() -> bool:
 
 
 def _restart_ollama() -> None:
-    """Best-effort local Ollama recovery. Safe to call repeatedly."""
+
     with _OLLAMA_RECOVERY_LOCK:
         if _ollama_healthy():
             return
@@ -98,8 +97,7 @@ def _restart_ollama() -> None:
 
         try:
             if sys.platform == "darwin":
-                # On macOS, reopening the Ollama app is the least invasive way
-                # to bring its local daemon back. This returns immediately.
+  
                 subprocess.Popen(
                     ["open", "-a", "Ollama"],
                     stdout=subprocess.DEVNULL,
@@ -107,7 +105,7 @@ def _restart_ollama() -> None:
                     start_new_session=True,
                 )
             else:
-                # On Linux/other environments, start the Ollama daemon if it is down.
+                # On Linux, start the Ollama daemon if it is down.
                 subprocess.Popen(
                     ["ollama", "serve"],
                     stdout=subprocess.DEVNULL,
@@ -121,7 +119,7 @@ def _restart_ollama() -> None:
                 flush=True,
             )
 
-        # Give the daemon/app a chance to come back before the caller retries.
+
         for _ in range(OLLAMA_MAX_RETRIES):
             time.sleep(2)
             if _ollama_healthy():
@@ -132,7 +130,7 @@ def _restart_ollama() -> None:
 
 
 def _ask_with_retries(client, prompt, *, effort, max_tokens, prefix=None):
-    """Run one model request with retry + Ollama recovery."""
+
     last_error = None
 
     for attempt in range(OLLAMA_MAX_RETRIES + 1):
@@ -162,7 +160,7 @@ def _ask_with_retries(client, prompt, *, effort, max_tokens, prefix=None):
 
 
 def _run_probe_with_retries(**kwargs):
-    """Run the probe; restart/retry on transient local Ollama failures."""
+
     last_error = None
 
     for attempt in range(OLLAMA_MAX_RETRIES + 1):
@@ -259,8 +257,7 @@ def evaluate_example(
 
     start_time = time.perf_counter()
 
-    # Pass the prefix downstream to the client to pre-fill the reasoning sequence
-    # (Client wrapper should appropriately inject this for Thought Anchor continuations)
+
     response: Qwen3Response = _ask_with_retries(
         client,
         prompt,
@@ -291,7 +288,7 @@ def evaluate_example(
         and model_answer == metadata["anti_stereotype_index"]
     )
 
-    # Added extraction for evidence alignment and twin metadata
+
     evidence_alignment = example.get("evidence_allignment", example.get("evidence_alignment"))
 
     return {
@@ -374,10 +371,7 @@ def process_example_condition(
         probe_prompt = format_prompt(example, prompt_control=condition["prompt_control"])
         probing_max_tokens = get_full_chain_max_tokens(condition)
 
-        # Same effort resolution evaluate_example() uses, so a fallback
-        # full-chain generation (when there's no thinking to reuse) requests
-        # the same reasoning level the condition actually asked for, instead
-        # of silently forcing reasoning back on.
+
         probe_effort = condition["effort"]
         if probe_effort is None:
             probe_effort = "medium" if condition["think"] else "off"
@@ -418,16 +412,16 @@ def process_example_condition(
             result["answer_is_forced"] = False
             result["effective_answer"] = result["model_answer"]
 
-        # The effective/probe answer is the canonical answer used for evaluation.
+
         result["model_answer"] = result["effective_answer"]
 
-        # Recompute correctness using the canonical answer.
+
         result["is_correct"] = (
             result["model_answer"] is not None
             and result["model_answer"] == result["correct_answer"]
         )
 
-        # Recompute answer-selection flags using the canonical answer.
+
         result["selected_unknown"] = (
             result["model_answer"] is not None
             and result["model_answer"] == result["unknown_index"]
@@ -442,9 +436,7 @@ def process_example_condition(
             result["model_answer"] is not None
             and result["model_answer"] == result["anti_stereotype_index"]
         )
-        # --- Flip Rate (Commitment Robustness) Evaluation ---
-        # Resample K continuations from the exact commitment prefix.
-        # Invalid/unparseable continuations are excluded from the denominator.
+
         result["flip_rate"] = None
         result["flip_flips"] = 0
         result["flip_valid_resamples"] = 0
@@ -474,7 +466,7 @@ def process_example_condition(
 
                 resampled_answer = resample.get("model_answer")
 
-                # For robustness, do not count a failed parse as a flip.
+
                 if resampled_answer is None:
                     result["flip_invalid_resamples"] += 1
                     continue

@@ -19,7 +19,7 @@ from core.evaluation.evaluation import build_conditions, process_example_conditi
 from core.evaluation.metrics import save_json, save_csv
 
 SAMPLE_PAIRS = 5
-ITEMS_PER_PAIR = 3  # a, b, ambig
+ITEMS_PER_PAIR = 3  
 SAMPLE_ITEMS = SAMPLE_PAIRS * ITEMS_PER_PAIR
 TASK_WORKERS = 4
 

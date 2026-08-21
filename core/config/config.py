@@ -3,7 +3,10 @@ from pathlib import Path
 import os
  
 MODEL = "kimi-k2.6"
- 
+
+ #this is just a command to copy and paste to run in terminal to start the ollama server with the correct settings
+#OLLAMA_HOST=0.0.0.0:11434 OLLAMA_NUM_PARALLEL=10 CUDA_VISIBLE_DEVICES=7 OLLAMA_NUM_CTX=16384 OLLAMA_KEEP_ALIVE=-1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_MAX_QUEUE=512 OLLAMA_FLASH_ATTENTION=true ollama serve
+
 MODEL_PROFILES = {
     "qwen3:4b": {"backend": "ollama", "model_id": "qwen3:4b"},
     "qwen3.5:9b": {"backend": "ollama", "model_id": "qwen3.5:9b"},
@@ -42,14 +45,12 @@ PROMPT_CONTROL_OPTIONS = []
 PROMPT_CONTROLS = []
 BUDGET_THINK_MODES = [True]
  
- 
+
 DATA_ROOT = PROJECT_ROOT / "data"
  
 PAIRS_DATASET_PATH = DATA_ROOT / "bbq_twins_fixedjsonl"
 CLEAN_DATASET_PATH = DATA_ROOT / "bbq_clean.jsonl"
-# Legacy hand-sampled subset path (models/config.py::DATASET_PATH) - not
-# used by the main twin-pair flow, kept for scripts/tools that still
-# reference a flat single-file dataset.
+
 DATASET_PATH = PROJECT_ROOT / "core" / "bbq_subset.jsonl"
  
 MAX_EXAMPLES = None
@@ -62,10 +63,10 @@ CHECKPOINT_INTERVAL = 100
 ENABLE_FLIP_RATE_EVAL = False
 FLIP_RATE_K = 3
 ENABLE_FORCED_ANSWER = True
-# Ollama defaults num_ctx to 4096; probe_cut_point concatenates the question
-# prompt with the full partial reasoning trace, which can exceed that on
-# longer chains and get silently truncated from the front (keep=4), dropping
-# the actual question. Match client.py's raised default here too.
+
+#num ctx is changed to fix a truncation error
+# probe_cut_point concatenates the question
+# prompt with the full partial reasoning trace, which can exceed that on longer chains and get silently truncated from the front 
 NUM_CTX = 16384
  
 def test_effort_conversion():

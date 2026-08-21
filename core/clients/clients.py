@@ -15,10 +15,7 @@ def get_model_profile(model_name: str) -> dict:
 
 
 def get_client(model_name: str):
-    """
-    Returns a thread-local client instance for the requested model.
-    Instantiates OpenRouterModelClient, AzureOpenAIClient, or Qwen3Client based on backend.
-    """
+
     if not hasattr(_thread_local, "client"):
         profile = get_model_profile(model_name)
 

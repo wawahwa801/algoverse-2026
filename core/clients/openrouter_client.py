@@ -27,12 +27,6 @@ class OpenRouterResponse:
 
 
 class OpenRouterClient:
-    """Generic async client for OpenRouter's OpenAI-compatible chat API.
-
-    All four target models (GLM 5.2, Qwen 3.6, Kimi K3, DeepSeek V4) expose
-    the same unified `reasoning: {"effort": ...}` control on OpenRouter, so
-    one client works for all of them - no per-model branching needed.
-    """
 
     def __init__(self, api_key: str | None = None, *, timeout: float = 180.0) -> None:
         self.api_key = api_key or os.environ["OPENROUTER_API_KEY"]
@@ -54,9 +48,7 @@ class OpenRouterClient:
         prefix: str | None = None,
     ) -> OpenRouterResponse:
         messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
-        # Used by flip-rate resampling to continue from a truncated prior
-        # reasoning trace - appended as an assistant turn, matching
-        # AzureOpenAIClient/Qwen3Client's handling of the same parameter.
+
         if prefix:
             messages.append({"role": "assistant", "content": prefix})
 
@@ -68,11 +60,7 @@ class OpenRouterClient:
         if effort is not None:
             payload["reasoning"] = {"effort": effort}
         else:
-            # Omitting "reasoning" entirely just falls back to the
-            # provider's default, which is NOT guaranteed to be off for
-            # hybrid-reasoning models (e.g. Kimi K2.6 may reason by
-            # default). Send an explicit disable so think=off conditions
-            # (and the no-reasoning probe calls) reliably turn thinking off.
+
             payload["reasoning"] = {"enabled": False}
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
@@ -80,12 +68,7 @@ class OpenRouterClient:
             payload["logprobs"] = True
             if top_logprobs is not None:
                 payload["top_logprobs"] = top_logprobs
-            # OpenRouter load-balances this model across several upstream
-            # providers; not all of them actually return logprobs even when
-            # requested, which silently yields an empty logprobs.content on
-            # affected requests instead of an error. Restrict routing to
-            # providers that support every parameter we sent (logprobs
-            # included) so probing doesn't intermittently come back empty.
+
             payload["provider"] = {"require_parameters": True}
 
         response = await self._client.post("/chat/completions", json=payload)
@@ -93,12 +76,7 @@ class OpenRouterClient:
         data = response.json()
 
         if "choices" not in data:
-            # A 200 response with no choices means OpenRouter couldn't
-            # route the request (e.g. no upstream provider satisfies
-            # require_parameters for this exact combination of params) -
-            # raise_for_status() doesn't catch this since the HTTP status
-            # is still 200. Surface the real reason instead of a bare
-            # KeyError('choices').
+
             error_info = data.get("error") if isinstance(data, dict) else None
             message = (
                 error_info.get("message")
@@ -126,13 +104,7 @@ class OpenRouterClient:
 
 
 class OpenRouterModelClient:
-    """Sync, Qwen3Client-compatible adapter over OpenRouterClient, bound to
-    one model id, so evaluate_example() (models/eval.py) can run unmodified
-    regardless of whether the backend is Ollama or OpenRouter. Meant to be
-    constructed once per worker thread (see eval.py's get_client) - keeps
-    one persistent event loop for the client's lifetime rather than
-    spinning a fresh loop per call, since OpenRouterClient's httpx.AsyncClient
-    isn't safe to reuse across unrelated event loops."""
+
 
     def __init__(self, model_id: str, api_key: str | None = None) -> None:
         self.model_id = model_id
@@ -173,11 +145,7 @@ class OpenRouterModelClient:
         )
 
     def probe_logprobs(self, prompt, *, top_logprobs=4):
-        """Force-continuation probe equivalent to eval.py's probe_cut_point,
-        but over the OpenRouter chat API - requests 1 output token with
-        logprobs and returns the raw per-token top_logprobs entries (or None
-        if the upstream provider didn't return any; not all OpenRouter
-        providers support logprobs even when requested)."""
+
         response: OpenRouterResponse = self._loop.run_until_complete(
             self._client.ask(
                 self.model_id,
