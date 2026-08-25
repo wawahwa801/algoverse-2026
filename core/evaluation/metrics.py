@@ -594,7 +594,7 @@ def print_summary(results):
 
 
 def main():
-    records = load_results(Path(__file__).resolve().parent.parent/"results"/"bbq_results_qwen3.5-9b.csv")
+    records = load_results(Path(__file__).resolve().parent.parent.parent/"experiment_results"/"bbq_results_qwen3.5-9b_combined.csv")
     unique_uids = {record.get("uid") for record in records if record.get("uid") is not None}
 
     print("Loaded rows:", len(records))
